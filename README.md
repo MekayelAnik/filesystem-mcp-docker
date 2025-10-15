@@ -7,7 +7,7 @@
 
 [![Docker Pulls](https://img.shields.io/docker/pulls/mekayelanik/filesystem-mcp.svg?style=flat-square)](https://hub.docker.com/r/mekayelanik/filesystem-mcp)
 [![Docker Stars](https://img.shields.io/docker/stars/mekayelanik/filesystem-mcp.svg?style=flat-square)](https://hub.docker.com/r/mekayelanik/filesystem-mcp)
-[![License](https://img.shields.io/badge/license-MIT-blue.svg?style=flat-square)](https://raw.githubusercontent.com/MekayelAnik/filesystem-mcp-docker/refs/heads/main/LICENSE)
+[![License](https://img.shields.io/badge/license-GPL-blue.svg?style=flat-square)](https://raw.githubusercontent.com/MekayelAnik/filesystem-mcp-docker/refs/heads/main/LICENSE)
 
 **[NPM Package](https://www.npmjs.com/package/@modelcontextprotocol/server-filesystem)** • **[GitHub Repository](https://github.com/mekayelanik/filesystem-mcp-docker)** • **[Docker Hub](https://hub.docker.com/r/mekayelanik/filesystem-mcp)**
 
