@@ -898,7 +898,7 @@ docker exec filesystem-mcp stat /projects/myproject/
 
 ### Documentation
 - 📦 [NPM Package](https://www.npmjs.com/package/@modelcontextprotocol/server-filesystem)
-- 🔧 [GitHub Repository](https://github.com/mekayelanik/filesystem-mcp)
+- 🔧 [GitHub Repository](https://github.com/mekayelanik/filesystem-mcp-docker)
 - 🐳 [Docker Hub](https://hub.docker.com/r/mekayelanik/filesystem-mcp)
 
 ### MCP Resources
@@ -909,8 +909,8 @@ docker exec filesystem-mcp stat /projects/myproject/
 ### Getting Help
 
 **Docker Image Issues:**
-- [GitHub Issues](https://github.com/mekayelanik/filesystem-mcp/issues)
-- [Discussions](https://github.com/mekayelanik/filesystem-mcp/discussions)
+- [GitHub Issues](https://github.com/mekayelanik/filesystem-mcp-docker/issues)
+- [Discussions](https://github.com/mekayelanik/filesystem-mcp-docker/discussions)
 
 **General Questions:**
 - Check logs: `docker logs filesystem-mcp`
@@ -996,6 +996,6 @@ Docker Image: GPL License - See [LICENSE](https://raw.githubusercontent.com/Meka
 
 <div align="center">
 
-[Report docker image related Bug](https://github.com/mekayelanik/filesystem-mcp/issues) • [Request Feature](https://github.com/mekayelanik/filesystem-mcp/issues) • [Contribute](https://github.com/mekayelanik/filesystem-mcp/pulls)
+[Report docker image related Bug](https://github.com/mekayelanik/filesystem-mcp-docker/issues) • [Request Feature](https://github.com/mekayelanik/filesystem-mcp-docker/issues) • [Contribute](https://github.com/mekayelanik/filesystem-mcp-docker/pulls)
 
 </div>
