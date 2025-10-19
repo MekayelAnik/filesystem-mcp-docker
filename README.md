@@ -24,55 +24,49 @@
 - [Available Tools](#available-tools)
 - [Advanced Usage](#advanced-usage)
 - [Troubleshooting](#troubleshooting)
-- [Resources & Support](#resources--support)
 
 ---
 
 ## Overview
 
-Filesystem MCP Server provides AI assistants with secure, controlled filesystem access capabilities. Read, write, edit, search, and manage files and directories within designated project folders. Seamlessly integrates with VS Code, Cursor, Windsurf, Claude Desktop, and any MCP-compatible client.
+Filesystem MCP Server provides AI assistants with secure, controlled filesystem access. Read, write, edit, search, and manage files and directories within designated project folders. Seamlessly integrates with VS Code, Cursor, Windsurf, Claude Desktop, and any MCP-compatible client.
 
 ### Key Features
 
 ✨ **Comprehensive File Operations** - Read, write, edit, move, and search files  
 📁 **Directory Management** - Create, list, and navigate directory structures  
-🔒 **Secure & Sandboxed** - Access limited to mounted project directories  
+🔒 **Secure & Sandboxed** - Access limited to project directories  
 🔍 **Advanced Search** - Pattern-based file search with regex support  
 📊 **File Metadata** - Detailed file information and directory trees  
 🚀 **Multiple Protocols** - HTTP, SSE, and WebSocket transport support  
 🎯 **Zero Configuration** - Works out of the box with sensible defaults  
 🔧 **Highly Customizable** - Fine-tune via environment variables  
 💾 **Media Support** - Handle text and binary files seamlessly  
-📈 **Health Monitoring** - Built-in health check endpoint
+🗂️ **Multi-Directory Support** - Configure multiple project directories
 
 ### Supported Architectures
 
-| Architecture | Status | Notes |
-|:-------------|:------:|:------|
-| **x86-64** | ✅ Stable | Intel/AMD processors |
-| **ARM64** | ✅ Stable | Raspberry Pi, Apple Silicon |
+| Architecture | Status |
+|:-------------|:------:|
+| **x86-64** | ✅ Stable |
+| **ARM64** | ✅ Stable |
 
 ### Available Tags
 
-| Tag | Stability | Use Case |
-|:----|:---------:|:---------|
-| `stable` | ⭐⭐⭐ | **Production (recommended)** |
-| `latest` | ⭐⭐⭐ | Latest stable features |
-| `1.x.x` | ⭐⭐⭐ | Version pinning |
-| `beta` | ⚠️ | Testing only |
+| Tag | Use Case |
+|:----|:---------|
+| `stable` | **Production (recommended)** |
+| `latest` | Latest stable features |
+| `1.x.x` | Version pinning |
+| `beta` | Testing only |
 
 ---
 
 ## Quick Start
 
-### Prerequisites
-
-- Docker Engine 23.0+
-- Project directories to mount
-- Network access for MCP communication
-
 ### Docker Compose (Recommended)
 
+**Single Directory:**
 ```yaml
 services:
   filesystem-mcp:
@@ -82,19 +76,35 @@ services:
     ports:
       - "8015:8015"
     volumes:
-      - /path/to/project1:/projects/project1
-      - /path/to/project2:/projects/project2
+      - /home/user/workspace:/home/user/workspace
     environment:
-      - PORT=8015
-      - PUID=1000
-      - PGID=1000
-      - TZ=Asia/Dhaka
-      - PROTOCOL=SHTTP
-      - CORS=*
+      PORT: "8015"
+      PUID: "1000"
+      PGID: "1000"
+      PROJECT_DIRS: /home/user/workspace
+```
+
+**Multiple Directories:**
+```yaml
+services:
+  filesystem-mcp:
+    image: mekayelanik/filesystem-mcp:stable
+    container_name: filesystem-mcp
+    restart: unless-stopped
+    ports:
+      - "8015:8015"
+    volumes:
+      - /home/user/projects/web:/home/user/projects/web
+      - /home/user/projects/api:/home/user/projects/api
+      - /home/user/shared:/home/user/shared
+    environment:
+      PORT: "8015"
+      PUID: "1000"
+      PGID: "1000"
+      PROJECT_DIRS: "/home/user/projects/web,/home/user/projects/api,/home/user/shared"
 ```
 
 **Deploy:**
-
 ```bash
 docker compose up -d
 docker compose logs -f filesystem-mcp
@@ -102,30 +112,39 @@ docker compose logs -f filesystem-mcp
 
 ### Docker CLI
 
+**Single Directory:**
 ```bash
 docker run -d \
   --name=filesystem-mcp \
   --restart=unless-stopped \
   -p 8015:8015 \
-  -v /path/to/project:/projects/myproject \
+  -v /home/user/workspace:/home/user/workspace \
+  -e PROJECT_DIRS=/home/user/workspace \
   -e PORT=8015 \
   -e PUID=1000 \
   -e PGID=1000 \
-  -e PROTOCOL=SHTTP \
-  -e CORS=* \
+  mekayelanik/filesystem-mcp:stable
+```
+
+**Multiple Directories (space-separated):**
+```bash
+docker run -d \
+  --name=filesystem-mcp \
+  -p 8015:8015 \
+  -v /home/user/projects/web:/home/user/projects/web \
+  -v /home/user/projects/api:/home/user/projects/api \
+  -e PROJECT_DIRS="/home/user/projects/web /home/user/projects/api" \
   mekayelanik/filesystem-mcp:stable
 ```
 
 ### Access Endpoints
 
-| Protocol | Endpoint | Use Case |
-|:---------|:---------|:---------|
-| **HTTP** | `http://host-ip:8015/mcp` | **Recommended** |
-| **SSE** | `http://host-ip:8015/sse` | Real-time streaming |
-| **WebSocket** | `ws://host-ip:8015/message` | Bidirectional |
-| **Health** | `http://host-ip:8015/healthz` | Monitoring |
-
-> ⏱️ Server ready in 5-10 seconds after container start
+| Protocol | Endpoint |
+|:---------|:---------|
+| **HTTP** | `http://host-ip:8015/mcp` |
+| **SSE** | `http://host-ip:8015/sse` |
+| **WebSocket** | `ws://host-ip:8015/message` |
+| **Health** | `http://host-ip:8015/healthz` |
 
 ---
 
@@ -133,45 +152,89 @@ docker run -d \
 
 ### Environment Variables
 
-#### Core Settings
-
 | Variable | Default | Description |
 |:---------|:-------:|:------------|
+| **`PROJECT_DIRS`** | **`/projects`** | **Project directories (comma or space-separated)** |
 | `PORT` | `8015` | Server port (1-65535) |
 | `PUID` | `1000` | User ID for file permissions |
 | `PGID` | `1000` | Group ID for file permissions |
 | `TZ` | `Asia/Dhaka` | Container timezone |
 | `PROTOCOL` | `SHTTP` | Transport protocol |
 | `CORS` | _(none)_ | Cross-Origin configuration |
+| `DEBUG_MODE` | `false` | Enable debug mode |
 
-#### Advanced Settings
+### PROJECT_DIRS Configuration
 
-| Variable | Default | Description |
-|:---------|:-------:|:------------|
-| `DEBUG_MODE` | `false` | Enable debug mode (`true`, `false`, `1`, `yes`) |
+The `PROJECT_DIRS` environment variable specifies which directories the MCP server can access.
 
-### Volume Mounting
+**Format:** Comma (`,`) or space (` `) separated absolute paths
 
-**Critical:** You MUST mount at least one directory to `/projects`. The container will exit if `/projects` is empty.
+**Examples:**
 
 ```yaml
+# Single directory
+environment:
+  - PROJECT_DIRS=/workspace
+
+# Multiple directories (comma-separated)
+environment:
+  - PROJECT_DIRS=/workspace,/data,/configs
+
+# Multiple directories (space-separated)
+environment:
+  - PROJECT_DIRS="/workspace /data /configs"
+```
+
+**Requirements:**
+- All paths must be absolute (start with `/`)
+- Directories must exist and be mounted
+- At least one directory must be accessible
+- Maximum 255 characters per path
+- No directory traversal (`..`) allowed
+
+### Volume Mounting Strategies
+
+#### Strategy 1: Single Workspace
+```yaml
 volumes:
-  # Single project
-  - /home/user/myproject:/projects/myproject
+  - /home/user/projects:/home/user/projects
+environment:
+  PROJECT_DIRS: /home/user/projects
+```
 
-  # Multiple projects
-  - /home/user/web-app:/projects/web-app
-  - /home/user/api:/projects/api
-  - /home/user/docs:/projects/docs
+#### Strategy 2: Multiple Projects
+```yaml
+volumes:
+  - /home/user/projects/web:/home/user/projects/web
+  - /home/user/projects/mobile:/home/user/projects/mobile
+  - /home/user/projects/api:/home/user/projects/api
+environment:
+  PROJECT_DIRS: "/home/user/projects/web,/home/user/projects/mobile,/home/user/projects/api"
+```
 
-  # Entire workspace
-  - /home/user/workspace:/projects
+#### Strategy 3: Mixed Access
+```yaml
+volumes:
+  - /opt/applications:/opt/applications
+  - /var/data:/var/data
+  - /etc/configs:/etc/configs:ro
+environment:
+  PROJECT_DIRS: "/opt/applications,/var/data,/etc/configs"
+```
+
+#### Strategy 4: Default /projects
+```yaml
+volumes:
+  - /home/user/project1:/projects/project1
+  - /home/user/project2:/projects/project2
+environment:
+  PROJECT_DIRS: /projects
 ```
 
 ### Protocol Configuration
 
 ```yaml
-# HTTP/Streamable HTTP (Recommended)
+# HTTP (Recommended)
 environment:
   - PROTOCOL=SHTTP
 
@@ -187,63 +250,32 @@ environment:
 ### CORS Configuration
 
 ```yaml
-# Development - Allow all origins
+# Development
 environment:
   - CORS=*
 
-# Production - Specific domains
+# Production
 environment:
   - CORS=https://example.com,https://app.example.com
-
-# Mixed domains and IPs
-environment:
-  - CORS=https://example.com,192.168.1.100:3000,/.*\.myapp\.com$/
-
-# Regex patterns
-environment:
-  - CORS=/^https:\/\/.*\.example\.com$/
 ```
 
-> ⚠️ **Security:** Never use `CORS=*` in production environments
+> ⚠️ Never use `CORS=*` in production
 
 ### Permission Management
 
-The container runs as a non-root user with configurable UID/GID:
-
 ```yaml
 environment:
-  # Match your host user ID
   - PUID=1000  # Run: id -u
   - PGID=1000  # Run: id -g
-```
-
-**Finding your UID/GID:**
-```bash
-# Linux/macOS
-id -u  # Shows your UID
-id -g  # Shows your GID
-
-# Use these values for PUID/PGID
 ```
 
 ---
 
 ## MCP Client Setup
 
-### Transport Compatibility
-
-| Client | HTTP | SSE | WebSocket | Recommended |
-|:-------|:----:|:---:|:---------:|:------------|
-| **VS Code (Cline/Roo-Cline)** | ✅ | ✅ | ❌ | HTTP |
-| **Claude Desktop** | ✅ | ✅ | ⚠️* | HTTP |
-| **Cursor** | ✅ | ✅ | ⚠️* | HTTP |
-| **Windsurf** | ✅ | ✅ | ⚠️* | HTTP |
-
-> ⚠️ *WebSocket support is experimental
-
 ### VS Code (Cline/Roo-Cline)
 
-Add to `.vscode/settings.json`:
+`.vscode/settings.json`:
 
 ```json
 {
@@ -252,19 +284,19 @@ Add to `.vscode/settings.json`:
       "url": "http://host-ip:8015/mcp",
       "transport": "http",
       "autoApprove": [
-        "filesystem_read_text_file",
-        "filesystem_read_media_file",
-        "filesystem_read_multiple_files",
-        "filesystem_write_file",
-        "filesystem_edit_file",
-        "filesystem_create_directory",
-        "filesystem_list_directory",
-        "filesystem_list_directory_with_sizes",
-        "filesystem_directory_tree",
-        "filesystem_move_file",
-        "filesystem_search_files",
-        "filesystem_get_file_info",
-        "filesystem_list_allowed_directories"
+        "read_text_file",
+        "read_media_file",
+        "read_multiple_files",
+        "write_file",
+        "edit_file",
+        "create_directory",
+        "list_directory",
+        "list_directory_with_sizes",
+        "directory_tree",
+        "move_file",
+        "search_files",
+        "get_file_info",
+        "list_allowed_directories
       ]
     }
   }
@@ -273,10 +305,9 @@ Add to `.vscode/settings.json`:
 
 ### Claude Desktop
 
-**Config Locations:**
-- **Linux:** `~/.config/Claude/claude_desktop_config.json`
-- **macOS:** `~/Library/Application Support/Claude/claude_desktop_config.json`
-- **Windows:** `%APPDATA%\Claude\claude_desktop_config.json`
+**Linux:** `~/.config/Claude/claude_desktop_config.json`  
+**macOS:** `~/Library/Application Support/Claude/claude_desktop_config.json`  
+**Windows:** `%APPDATA%\Claude\claude_desktop_config.json`
 
 ```json
 {
@@ -291,7 +322,7 @@ Add to `.vscode/settings.json`:
 
 ### Cursor
 
-Add to `~/.cursor/mcp.json`:
+`~/.cursor/mcp.json`:
 
 ```json
 {
@@ -304,47 +335,9 @@ Add to `~/.cursor/mcp.json`:
 }
 ```
 
-### Windsurf (Codeium)
+### Windsurf
 
-Add to `.codeium/mcp_settings.json`:
-
-```json
-{
-  "mcpServers": {
-    "filesystem": {
-      "transport": "http",
-      "url": "http://host-ip:8015/mcp"
-    }
-  }
-}
-```
-
-### Claude Code
-
-Add to `~/.config/claude-code/mcp_config.json`:
-
-```json
-{
-  "mcpServers": {
-    "filesystem": {
-      "transport": "http",
-      "url": "http://localhost:8015/mcp"
-    }
-  }
-}
-```
-
-Or configure via CLI:
-
-```bash
-claude-code config mcp add filesystem \
-  --transport http \
-  --url http://localhost:8015/mcp
-```
-
-### GitHub Copilot CLI
-
-Add to `~/.github-copilot/mcp.json`:
+`.codeium/mcp_settings.json`:
 
 ```json
 {
@@ -355,279 +348,155 @@ Add to `~/.github-copilot/mcp.json`:
     }
   }
 }
-```
-
-Or use environment variable:
-
-```bash
-export GITHUB_COPILOT_MCP_SERVERS='{"filesystem":{"transport":"http","url":"http://localhost:8015/mcp"}}'
 ```
 
 ---
 
 ## Available Tools
 
-### 📄 filesystem_read_text_file
+### 📄 read_text_file
 Read complete contents of a text file from the filesystem.
 
 **Parameters:**
-- `path` (string, required): Path to the file (relative to allowed directories)
+- `path` (string, required): Path to file
+- `head` (number, optional): Read first N lines
+- `tail` (number, optional): Read last N lines
 
-**Use Cases:**
-- Reading configuration files
-- Analyzing source code
-- Processing log files
-- Reading documentation
-
-**Example Prompts:**
-- "Read the contents of /projects/myapp/config.json"
-- "Show me the README.md file"
-- "What's in the main.py file?"
+**Example:** "Read config.json" or "Show me the first 50 lines of app.log"
 
 ---
 
-### 🖼️ filesystem_read_media_file
-Read media files (images, videos, PDFs) and return as base64-encoded data.
+### 🖼️ read_media_file
+Read media files (images, videos, PDFs) as base64-encoded data with MIME type.
 
 **Parameters:**
-- `path` (string, required): Path to the media file
+- `path` (string, required): Path to media file
 
-**Use Cases:**
-- Processing images
-- Analyzing PDFs
-- Handling binary files
-- Media file inspection
-
-**Example Prompts:**
-- "Read the logo.png image"
-- "Show me the contents of document.pdf"
-- "Load the profile picture"
+**Example:** "Load the logo.png image" or "Read document.pdf"
 
 ---
 
-### 📚 filesystem_read_multiple_files
-Read multiple files simultaneously with efficient batch processing.
+### 📚 read_multiple_files
+Read multiple files simultaneously. Failed reads won't stop the operation.
 
 **Parameters:**
-- `paths` (array, required): Array of file paths to read
+- `paths` (array, required): Array of file paths
 
-**Use Cases:**
-- Comparing multiple files
-- Batch file processing
-- Project structure analysis
-- Multi-file refactoring
-
-**Example Prompts:**
-- "Read all Python files in the src directory"
-- "Show me config.json and settings.yaml"
-- "Load all markdown files from docs/"
+**Example:** "Read all Python files in src/" or "Load config.json and settings.yaml"
 
 ---
 
-### ✍️ filesystem_write_file
+### ✏️ write_file
 Create new files or overwrite existing ones with specified content.
 
 **Parameters:**
-- `path` (string, required): Path where the file should be written
-- `content` (string, required): Content to write to the file
+- `path` (string, required): File location
+- `content` (string, required): File content
 
-**Use Cases:**
-- Creating new files
-- Saving generated code
-- Writing configuration files
-- Updating documentation
-
-**Example Prompts:**
-- "Create a new file called test.js with this code"
-- "Write this configuration to config.yaml"
-- "Save this content to output.txt"
+**Example:** "Create test.js with this code" or "Save output to results.txt"
 
 ---
 
-### ✏️ filesystem_edit_file
-Make selective edits to files using advanced pattern matching and replacement.
+### ✏️ edit_file
+Make selective edits using pattern matching with whitespace normalization and indentation preservation.
 
 **Parameters:**
-- `path` (string, required): Path to the file to edit
-- `edits` (array, required): Array of edit operations
+- `path` (string, required): File to edit
+- `edits` (array, required): Edit operations with `oldText` and `newText`
 - `dryRun` (boolean, optional): Preview changes without applying
 
-**Edit Operations:**
-- `oldText` (string, required): Text to search for (supports regex)
-- `newText` (string, required): Replacement text
-
-**Use Cases:**
-- Refactoring code
-- Updating configurations
-- Fixing bugs across files
-- Batch text replacements
-
-**Example Prompts:**
-- "Replace all instances of 'oldFunc' with 'newFunc' in utils.js"
-- "Update the version number in package.json"
-- "Change the API endpoint in config.js"
+**Example:** "Replace 'oldFunc' with 'newFunc' in utils.js"
 
 ---
 
-### 📁 filesystem_create_directory
-Create new directories with full path support (creates parent directories automatically).
+### 📁 create_directory
+Create new directory with automatic parent directory creation.
 
 **Parameters:**
-- `path` (string, required): Path of the directory to create
+- `path` (string, required): Directory path
 
-**Use Cases:**
-- Setting up project structure
-- Creating organized folder hierarchies
-- Preparing build directories
-- Organizing file outputs
-
-**Example Prompts:**
-- "Create a new directory called 'components'"
-- "Make a folder structure: src/utils/helpers"
-- "Create the build/output directory"
+**Example:** "Create folder structure: src/utils/helpers"
 
 ---
 
-### 📋 filesystem_list_directory
-List contents of a directory with basic file information.
+### 📋 list_directory
+List directory contents with [FILE] or [DIR] prefixes.
 
 **Parameters:**
-- `path` (string, required): Path to the directory to list
+- `path` (string, required): Directory path
 
-**Use Cases:**
-- Exploring project structure
-- Finding specific files
-- Directory content inspection
-- File organization review
-
-**Example Prompts:**
-- "List all files in the src directory"
-- "Show me what's in the components folder"
-- "What files are in the root directory?"
+**Example:** "List all files in the src directory"
 
 ---
 
-### 📊 filesystem_list_directory_with_sizes
-List directory contents with detailed size information for each file.
+### 📊 list_directory_with_sizes
+List directory contents with detailed size information and sorting options.
 
 **Parameters:**
-- `path` (string, required): Path to the directory
+- `path` (string, required): Directory path
+- `sortBy` (string, optional): Sort by "name" or "size"
 
-**Use Cases:**
-- Analyzing disk usage
-- Finding large files
-- Project size management
-- Storage optimization
+**Returns:** File listings with sizes, total files, directories, and combined size
 
-**Example Prompts:**
-- "Show file sizes in the uploads directory"
-- "List all files with their sizes in /projects/data"
-- "What are the largest files in this folder?"
+**Example:** "Show file sizes in the uploads directory sorted by size"
 
 ---
 
-### 🌳 filesystem_directory_tree
-Generate a hierarchical tree view of directory structure and contents.
+### 🌳 directory_tree
+Get recursive tree view of files and directories as JSON structure.
 
 **Parameters:**
-- `path` (string, required): Root directory path for the tree
+- `path` (string, required): Starting directory
 
-**Use Cases:**
-- Visualizing project structure
-- Documentation generation
-- Architecture understanding
-- Project overview
+**Returns:** JSON with `name`, `type`, and `children` (for directories)
 
-**Example Prompts:**
-- "Show me the directory tree of the entire project"
-- "Generate a tree view of the src folder"
-- "Display the file structure of /projects/myapp"
+**Example:** "Show the directory tree of the entire project"
 
 ---
 
-### 🔄 filesystem_move_file
-Move or rename files and directories safely.
+### 📦 move_file
+Move or rename files and directories. Fails if destination exists.
 
 **Parameters:**
-- `source` (string, required): Current file/directory path
-- `destination` (string, required): New file/directory path
+- `source` (string, required): Current path
+- `destination` (string, required): New path
 
-**Use Cases:**
-- Renaming files
-- Reorganizing project structure
-- Moving files between directories
-- Batch file organization
-
-**Example Prompts:**
-- "Rename config.old.json to config.json"
-- "Move test.js to the tests directory"
-- "Relocate utils.py to src/helpers/"
+**Example:** "Rename config.old.json to config.json" or "Move test.js to tests/"
 
 ---
 
-### 🔍 filesystem_search_files
-Search for files using glob patterns with powerful pattern matching.
+### 🔍 search_files
+Recursively search for files/directories using glob patterns.
 
 **Parameters:**
-- `path` (string, required): Directory to search in
-- `pattern` (string, required): Glob pattern (e.g., "*.js", "**/*.py")
+- `path` (string, required): Starting directory
+- `pattern` (string, required): Search pattern (e.g., `*.js`, `**/*.py`)
 - `excludePatterns` (array, optional): Patterns to exclude
 
-**Pattern Examples:**
-- `*.js` - All JavaScript files in directory
-- `**/*.py` - All Python files recursively
-- `src/**/*.test.js` - All test files in src
-
-**Use Cases:**
-- Finding files by extension
-- Locating test files
-- Searching for specific patterns
-- Project-wide file discovery
-
-**Example Prompts:**
-- "Find all JavaScript files in the project"
-- "Search for all test files"
-- "Locate all markdown files recursively"
+**Example:** "Find all JavaScript files" or "Search for *.test.js excluding node_modules"
 
 ---
 
-### ℹ️ filesystem_get_file_info
-Get detailed metadata about files and directories.
+### ℹ️ get_file_info
+Get detailed file/directory metadata.
 
 **Parameters:**
-- `path` (string, required): Path to the file or directory
+- `path` (string, required): File or directory path
 
-**Returns:**
-- Size, type, permissions
-- Creation and modification times
-- File attributes
+**Returns:** Size, creation time, modified time, access time, type, permissions
 
-**Use Cases:**
-- File metadata inspection
-- Checking file properties
-- Verifying file existence
-- Permission validation
-
-**Example Prompts:**
-- "Get information about config.json"
-- "Show me details of the logs directory"
-- "Check the properties of index.html"
+**Example:** "Get information about config.json" or "Check properties of logs/"
 
 ---
 
-### 📍 filesystem_list_allowed_directories
-List all directories that the MCP server has access to.
+### 📂 list_allowed_directories
+List all directories the server is allowed to access.
 
-**Use Cases:**
-- Discovering available project directories
-- Verifying access permissions
-- Understanding server scope
-- Configuration validation
+**Parameters:** None
 
-**Example Prompts:**
-- "What directories can you access?"
-- "Show me all allowed directories"
-- "List available project folders"
+**Returns:** List of accessible directories configured via PROJECT_DIRS
+
+**Example:** "What directories can you access?" or "Show allowed directories"
 
 ---
 
@@ -639,102 +508,81 @@ List all directories that the MCP server has access to.
 services:
   filesystem-mcp:
     image: mekayelanik/filesystem-mcp:stable
-    container_name: filesystem-mcp
     restart: unless-stopped
     ports:
       - "8015:8015"
     volumes:
-      - /opt/projects/web-app:/projects/web-app:ro  # Read-only
-      - /opt/projects/api:/projects/api
-      - /var/log/apps:/projects/logs:ro
+      - /opt/apps/web:/opt/apps/web
+      - /opt/apps/api:/opt/apps/api:ro
+      - /var/data:/var/data
     environment:
-      # Core settings
-      - PORT=8015
-      - PUID=1000
-      - PGID=1000
-      - TZ=UTC
-      - PROTOCOL=SHTTP
-      
-      # Security
-      - CORS=https://app.example.com,https://admin.example.com
-    
-    # Resource limits
+      PORT: "8015"
+      PUID: "1000"
+      PGID: "1000"
+      TZ: UTC
+      PROTOCOL: SHTTP
+      CORS: "https://app.example.com"
+      PROJECT_DIRS: "/opt/apps/web,/opt/apps/api,/var/data"
     deploy:
       resources:
         limits:
           cpus: '1.0'
           memory: 512M
-        reservations:
-          cpus: '0.5'
-          memory: 256M
-    
-    # Health check
     healthcheck:
       test: ["CMD", "nc", "-z", "localhost", "8015"]
       interval: 30s
       timeout: 10s
       retries: 3
-      start_period: 10s
 ```
 
-### Read-Only Access
-
-Protect sensitive directories from modifications:
+### Development Setup
 
 ```yaml
 volumes:
-  - /path/to/source:/projects/source:ro
-  - /path/to/configs:/projects/configs:ro
-  - /path/to/logs:/projects/logs:ro
+  - /home/user/code/frontend:/home/user/code/frontend
+  - /home/user/code/backend:/home/user/code/backend
+  - /home/user/code/shared:/home/user/code/shared
+environment:
+  PROJECT_DIRS: "/home/user/code/frontend,/home/user/code/backend,/home/user/code/shared"
+  CORS: "*"
 ```
 
-### Multiple Project Workspaces
+### Data Science Workspace
 
 ```yaml
 volumes:
-  # Client projects
-  - /home/user/clients/acme:/projects/acme
-  - /home/user/clients/techcorp:/projects/techcorp
-  
-  # Personal projects
-  - /home/user/personal/blog:/projects/blog
-  - /home/user/personal/scripts:/projects/scripts
-  
-  # Shared resources
-  - /home/user/shared/templates:/projects/templates:ro
-  - /home/user/shared/assets:/projects/assets:ro
+  - /mnt/datasets:/mnt/datasets:ro
+  - /mnt/models:/mnt/models
+  - /mnt/notebooks:/mnt/notebooks
+  - /mnt/outputs:/mnt/outputs
+environment:
+  PROJECT_DIRS: "/mnt/datasets,/mnt/models,/mnt/notebooks,/mnt/outputs"
 ```
 
-### Docker Network Setup
+### Docker Network
 
 ```yaml
 services:
   filesystem-mcp:
     image: mekayelanik/filesystem-mcp:stable
-    container_name: filesystem-mcp
     networks:
       - mcp-network
     volumes:
-      - ./projects:/projects
+      - /var/app-data:/var/app-data
     environment:
-      - PORT=8015
-      - PROTOCOL=SHTTP
+      PROJECT_DIRS: /var/app-data
     
-  ai-application:
-    image: ai-app:latest
+  ai-app:
     networks:
       - mcp-network
     environment:
-      - FILESYSTEM_MCP_URL=http://filesystem-mcp:8015/mcp
+      MCP_URL: http://filesystem-mcp:8015/mcp
 
 networks:
   mcp-network:
-    driver: bridge
 ```
 
-### Reverse Proxy Setup
-
-#### Nginx
+### Nginx Reverse Proxy
 
 ```nginx
 server {
@@ -747,202 +595,216 @@ server {
         proxy_set_header Upgrade $http_upgrade;
         proxy_set_header Connection "upgrade";
         proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto $scheme;
         
-        # Timeouts for file operations
         proxy_connect_timeout 300;
         proxy_send_timeout 300;
         proxy_read_timeout 300;
         
-        # Larger buffer for file content
         client_max_body_size 100M;
     }
 }
 ```
 
-#### Traefik
+### Kubernetes Deployment
 
 ```yaml
-services:
-  filesystem-mcp:
-    image: mekayelanik/filesystem-mcp:stable
-    labels:
-      - "traefik.enable=true"
-      - "traefik.http.routers.filesystem-mcp.rule=Host(`filesystem.example.com`)"
-      - "traefik.http.routers.filesystem-mcp.entrypoints=websecure"
-      - "traefik.http.routers.filesystem-mcp.tls.certresolver=myresolver"
-      - "traefik.http.services.filesystem-mcp.loadbalancer.server.port=8015"
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: filesystem-mcp
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: filesystem-mcp
+  template:
+    metadata:
+      labels:
+        app: filesystem-mcp
+    spec:
+      containers:
+      - name: filesystem-mcp
+        image: mekayelanik/filesystem-mcp:stable
+        ports:
+        - containerPort: 8015
+        env:
+        - name: PROJECT_DIRS
+          value: "/workspace,/data"
+        - name: PORT
+          value: "8015"
+        volumeMounts:
+        - name: workspace
+          mountPath: /workspace
+        - name: data
+          mountPath: /data
+      volumes:
+      - name: workspace
+        persistentVolumeClaim:
+          claimName: workspace-pvc
+      - name: data
+        persistentVolumeClaim:
+          claimName: data-pvc
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: filesystem-mcp
+spec:
+  selector:
+    app: filesystem-mcp
+  ports:
+  - port: 8015
+    targetPort: 8015
 ```
 
 ---
 
 ## Troubleshooting
 
-### Pre-Flight Checklist
-
-- ✅ Docker 23.0+
-- ✅ Port 8015 available
-- ✅ At least one volume mounted to `/projects`
-- ✅ Correct PUID/PGID for file permissions
-- ✅ Latest stable image
-
 ### Common Issues
 
 **Container Won't Start**
 ```bash
-# Check logs
 docker logs filesystem-mcp
-
-# Pull latest image
 docker pull mekayelanik/filesystem-mcp:stable
-
-# Restart container
 docker restart filesystem-mcp
 ```
 
-**"ERROR: /projects directory is empty!"**
+**No Valid Directories**
 ```bash
-# You must mount at least one directory
+# Ensure PROJECT_DIRS paths exist and are mounted
 docker run -d \
-  --name filesystem-mcp \
-  -v /path/to/your/project:/projects/myproject \
+  -v /home/user/workspace:/home/user/workspace \
+  -e PROJECT_DIRS=/home/user/workspace \
   mekayelanik/filesystem-mcp:stable
+
+# Check mounted volumes
+docker inspect filesystem-mcp | grep -A 10 Mounts
 ```
 
-**Permission Denied Errors**
+**Directory Not Accessible**
 ```bash
-# Check your user ID
-id -u  # Use this for PUID
-id -g  # Use this for PGID
+# Verify directory exists
+docker exec filesystem-mcp ls -la /home/user/workspace
 
-# Update environment variables
--e PUID=1000 \
--e PGID=1000
+# Check PROJECT_DIRS
+docker exec filesystem-mcp env | grep PROJECT_DIRS
+
+# View validation logs
+docker logs filesystem-mcp | grep "Validating"
 ```
 
-**Cannot Read/Write Files**
+**Permission Denied**
 ```bash
-# Check volume mount permissions
-ls -la /path/to/mounted/directory
+# Check UID/GID
+id -u  # Use for PUID
+id -g  # Use for PGID
 
-# Fix ownership if needed
-sudo chown -R 1000:1000 /path/to/mounted/directory
+# Fix ownership
+sudo chown -R 1000:1000 /home/user/workspace
+```
+
+**Multiple Directories Not Working**
+```bash
+# IMPORTANT: Use dictionary format in docker-compose.yml
+# ✅ CORRECT:
+environment:
+  PROJECT_DIRS: "/home/user/web,/home/user/api"
+  
+# ❌ WRONG: List format causes issues with commas
+environment:
+  - PROJECT_DIRS="/home/user/web,/home/user/api"
+
+# Alternative: Use space separator
+environment:
+  PROJECT_DIRS: "/home/user/web /home/user/api"
+
+# Verify all mounted
+docker exec filesystem-mcp ls -la /home/user/web /home/user/api
+
+# Check startup logs
+docker logs filesystem-mcp | grep "Added:"
 ```
 
 **Connection Refused**
 ```bash
-# Verify container is running
+# Check container status
 docker ps | grep filesystem-mcp
 
-# Check port binding
-docker port filesystem-mcp
-
-# Test health endpoint
+# Test health
 curl http://localhost:8015/healthz
+
+# Check port
+docker port filesystem-mcp
 ```
 
-**CORS Errors**
-```yaml
-# Development - allow all
-environment:
-  - CORS=*
-
-# Production - specific origins
-environment:
-  - CORS=https://yourdomain.com
-```
-
-**Debug Mode**
-```yaml
-# Enable debug mode
-environment:
-  - DEBUG_MODE=true
-
-# Container will pause with nano installed
-docker exec -it filesystem-mcp /bin/bash
-```
-
-### Health Check Testing
+### Health Checks
 
 ```bash
-# Basic health check
+# Basic health
 curl http://localhost:8015/healthz
 
 # Test MCP endpoint
 curl http://localhost:8015/mcp
 
-# List server capabilities
+# List directories
 curl -X POST http://localhost:8015/mcp \
   -H "Content-Type: application/json" \
-  -d '{"method":"tools/list"}'
+  -d '{"jsonrpc":"2.0","method":"tools/call","params":{"name":"list_allowed_directories"},"id":1}'
 ```
 
-### Checking Mounted Directories
+### Debug Mode
+
+```yaml
+environment:
+  - DEBUG_MODE=true
+
+# Exec into container
+docker exec -it filesystem-mcp /bin/bash
+
+# Check directories
+ls -la /workspace /data
+
+# View environment
+env | grep PROJECT_DIRS
+```
+
+### Validation Messages
 
 ```bash
-# View mounted directories
-docker exec filesystem-mcp ls -la /projects/
+# Expected startup output:
+docker logs filesystem-mcp
 
-# Check specific directory contents
-docker exec filesystem-mcp ls -la /projects/myproject/
-
-# Verify permissions
-docker exec filesystem-mcp stat /projects/myproject/
+# Output shows:
+# Validating project directories...
+#   ✓ Added: /home/user/workspace
+#   ✓ Added: /var/data
+# Configured 2 project director(y|ies):
+#   - /home/user/workspace
+#   - /var/data
 ```
 
 ---
 
-## Resources & Support
+## Migration Guide
 
-### Documentation
-- 📦 [NPM Package](https://www.npmjs.com/package/@modelcontextprotocol/server-filesystem)
-- 🔧 [GitHub Repository](https://github.com/mekayelanik/filesystem-mcp-docker)
-- 🐳 [Docker Hub](https://hub.docker.com/r/mekayelanik/filesystem-mcp)
+### From Single to Multiple Directories
 
-### MCP Resources
-- 📘 [MCP Protocol Specification](https://modelcontextprotocol.io)
-- 🎓 [MCP Documentation](https://modelcontextprotocol.io/docs)
-- 💬 [MCP Community](https://discord.gg/mcp)
-
-### Getting Help
-
-**Docker Image Issues:**
-- [GitHub Issues](https://github.com/mekayelanik/filesystem-mcp-docker/issues)
-- [Discussions](https://github.com/mekayelanik/filesystem-mcp-docker/discussions)
-
-**General Questions:**
-- Check logs: `docker logs filesystem-mcp`
-- Test health: `curl http://localhost:8015/healthz`
-- Review configuration in this README
-
-### Updating
-
-```bash
-# Docker Compose
-docker compose pull
-docker compose up -d
-
-# Docker CLI
-docker pull mekayelanik/filesystem-mcp:stable
-docker stop filesystem-mcp
-docker rm filesystem-mcp
-# Re-run your docker run command
+**Before:**
+```yaml
+volumes:
+  - /home/user/workspace:/home/user/workspace
+environment:
+  PROJECT_DIRS: /home/user/workspace
 ```
 
-### Version Pinning
-
+**After:**
 ```yaml
-# Use specific version
-services:
-  filesystem-mcp:
-    image: mekayelanik/filesystem-mcp:1.0.0
-
-# Or use stable tag (recommended)
-services:
-  filesystem-mcp:
-    image: mekayelanik/filesystem-mcp:stable
+volumes:
+  - /home/user/projects/web:/home/user/projects/web
+  - /home/user/projects/api:/home/user/projects/api
+environment:
+  PROJECT_DIRS: "/home/user/projects/web,/home/user/projects/api"
 ```
 
 ---
@@ -950,52 +812,140 @@ services:
 ## Security Best Practices
 
 1. **Never use `CORS=*` in production**
-2. **Use read-only mounts** for sensitive directories (`:ro`)
-3. **Set appropriate PUID/PGID** to match your user
-4. **Limit mounted directories** to only what's needed
-5. **Use reverse proxy** with authentication in production
-6. **Monitor logs** for suspicious file operations
-7. **Keep Docker image updated**
-8. **Use specific version tags** for production
-9. **Implement file size limits** at reverse proxy level
-10. **Regular backup** of mounted project directories
+2. **Use read-only mounts** (`:ro`) for sensitive directories
+3. **Limit PROJECT_DIRS** to necessary paths only
+4. **Set appropriate PUID/PGID** matching host user
+5. **Use reverse proxy** with authentication
+6. **Monitor logs** for suspicious operations
+7. **Keep image updated** regularly
+8. **Validate paths** before mounting
+9. **Implement rate limiting** at proxy level
+10. **Regular backups** of important directories
 
 ---
 
 ## Performance Tips
 
-### Resource Allocation
+1. **Local volumes** perform better than network mounts
+2. **Avoid NFS/CIFS** for frequently accessed directories
+3. **Use SSD storage** for better I/O performance
+4. **Limit directory depth** when possible
+5. **Regular cleanup** of temporary files
+6. **Resource limits** prevent overconsumption
 
-```yaml
-deploy:
-  resources:
-    limits:
-      cpus: '1.0'
-      memory: 512M
-    reservations:
-      cpus: '0.5'
-      memory: 256M
+---
+
+## Resources
+
+### Documentation
+- 📦 [NPM Package](https://www.npmjs.com/package/@modelcontextprotocol/server-filesystem)
+- 📧 [GitHub Repository](https://github.com/mekayelanik/filesystem-mcp-docker)
+- 🐳 [Docker Hub](https://hub.docker.com/r/mekayelanik/filesystem-mcp)
+
+### MCP Resources
+- 📘 [MCP Protocol](https://modelcontextprotocol.io)
+- 🎓 [MCP Documentation](https://modelcontextprotocol.io/docs)
+
+### Support
+- [GitHub Issues](https://github.com/mekayelanik/filesystem-mcp-docker/issues)
+- Check logs: `docker logs filesystem-mcp`
+- Test health: `curl http://localhost:8015/healthz`
+
+### Updating
+
+```bash
+# Docker Compose
+docker compose pull && docker compose up -d
+
+# Docker CLI
+docker pull mekayelanik/filesystem-mcp:stable
+docker stop filesystem-mcp && docker rm filesystem-mcp
+# Re-run docker run command
 ```
 
-### Optimize for Large Projects
+---
 
-- Use `.dockerignore` to exclude unnecessary files
-- Mount only active project directories
-- Consider using read-only mounts where possible
-- Regular cleanup of temporary files
+## Examples
+
+### Web Development
+
+```yaml
+volumes:
+  - /home/user/dev/frontend:/home/user/dev/frontend
+  - /home/user/dev/backend:/home/user/dev/backend
+  - /home/user/dev/shared:/home/user/dev/shared
+environment:
+  PROJECT_DIRS: "/home/user/dev/frontend,/home/user/dev/backend,/home/user/dev/shared"
+```
+
+### Content Management
+
+```yaml
+volumes:
+  - /var/www/html:/var/www/html:ro
+  - /var/content:/var/content
+  - /var/uploads:/var/uploads
+environment:
+  PROJECT_DIRS: "/var/www/html,/var/content,/var/uploads"
+```
+
+### CI/CD Pipeline
+
+```yaml
+volumes:
+  - /ci/src:/ci/src:ro
+  - /ci/build:/ci/build
+  - /ci/dist:/ci/dist
+environment:
+  PROJECT_DIRS: "/ci/src,/ci/build,/ci/dist"
+```
+
+### Machine Learning
+
+```yaml
+volumes:
+  - /ml/datasets:/ml/datasets:ro
+  - /ml/models:/ml/models
+  - /ml/experiments:/ml/experiments
+  - /ml/outputs:/ml/outputs
+environment:
+  PROJECT_DIRS: "/ml/datasets,/ml/models,/ml/experiments,/ml/outputs"
+```
+
+---
+
+## FAQ
+
+**Q: Can I use environment variables in PROJECT_DIRS?**  
+A: No, PROJECT_DIRS must contain literal paths. Set them in your compose file.
+
+**Q: What separators are supported?**  
+A: Comma (`,`) or space (` `). Use quotes for space-separated paths.
+
+**Q: Can I mount nested directories?**  
+A: Yes, but only specify the directories you need access to in PROJECT_DIRS.
+
+**Q: Does the server follow symlinks?**  
+A: Symlinks within PROJECT_DIRS are followed, but not outside.
+
+**Q: How many directories can I configure?**  
+A: No hard limit, but keep it reasonable for performance.
+
+**Q: Can I change PROJECT_DIRS without recreating the container?**  
+A: No, you must restart the container with new environment variables.
 
 ---
 
 ## License
 
-Docker Image: GPL License - See [LICENSE](https://raw.githubusercontent.com/MekayelAnik/filesystem-mcp-docker/refs/heads/main/LICENSE) for details.
+GPL License - See [LICENSE](https://raw.githubusercontent.com/MekayelAnik/filesystem-mcp-docker/refs/heads/main/LICENSE)
 
-**Disclaimer:** Unofficial Docker image for [@modelcontextprotocol/server-filesystem](https://www.npmjs.com/package/@modelcontextprotocol/server-filesystem). Users are responsible for ensuring proper file permissions and security of mounted directories.
+**Disclaimer:** Unofficial Docker image for [@modelcontextprotocol/server-filesystem](https://www.npmjs.com/package/@modelcontextprotocol/server-filesystem). Users responsible for proper security configuration.
 
 ---
 
 <div align="center">
 
-[Report docker image related Bug](https://github.com/mekayelanik/filesystem-mcp-docker/issues) • [Request Feature](https://github.com/mekayelanik/filesystem-mcp-docker/issues) • [Contribute](https://github.com/mekayelanik/filesystem-mcp-docker/pulls)
+[Report Bug](https://github.com/mekayelanik/filesystem-mcp-docker/issues) • [Request Feature](https://github.com/mekayelanik/filesystem-mcp-docker/issues) • [Contribute](https://github.com/mekayelanik/filesystem-mcp-docker/pulls)
 
 </div>

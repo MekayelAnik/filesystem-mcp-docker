@@ -7,6 +7,7 @@ readonly DEFAULT_PUID=1000
 readonly DEFAULT_PGID=1000
 readonly DEFAULT_PORT=8015
 readonly DEFAULT_PROTOCOL="SHTTP"
+readonly DEFAULT_PROJECT_DIRS="/projects"
 readonly FIRST_RUN_FILE="/tmp/first_run_complete"
 
 # Function to trim whitespace using parameter expansion
@@ -119,27 +120,111 @@ validate_port() {
     fi
 }
 
-# Check if /projects directory exists and is not empty
-check_projects_directory() {
-    if [ ! -d "/projects" ]; then
-        echo "ERROR: /projects directory does not exist!"
-        echo "Please mount your project directories to /projects using Docker volumes or bind mounts."
+# Validate and parse project directories
+validate_project_dirs() {
+    # Set default if not provided
+    PROJECT_DIRS=${PROJECT_DIRS:-$DEFAULT_PROJECT_DIRS}
+    
+    # Trim whitespace
+    PROJECT_DIRS=$(trim "$PROJECT_DIRS")
+    
+    # Remove surrounding quotes if present
+    PROJECT_DIRS="${PROJECT_DIRS#\"}"
+    PROJECT_DIRS="${PROJECT_DIRS%\"}"
+    PROJECT_DIRS="${PROJECT_DIRS#\'}"
+    PROJECT_DIRS="${PROJECT_DIRS%\'}"
+    
+    # Parse comma or space-separated directories
+    # First, replace commas with spaces to handle both formats uniformly
+    PROJECT_DIRS="${PROJECT_DIRS//,/ }"
+    
+    # Now parse space-separated directories
+    local IFS=' '
+    read -ra DIR_ARRAY <<< "$PROJECT_DIRS"
+    
+    # Array to store valid directories
+    VALID_DIRS=()
+    
+    echo "Validating project directories..."
+    for dir in "${DIR_ARRAY[@]}"; do
+        dir=$(trim "$dir")
+        
+        # Skip empty entries
+        [[ -z "$dir" ]] && continue
+        
+        # Remove trailing slash if present (except for root)
+        if [[ "$dir" != "/" ]]; then
+            dir="${dir%/}"
+        fi
+        
+        # Validate directory path
+        if ! validate_directory "$dir"; then
+            echo "Warning: Invalid directory path '$dir' - skipping"
+            continue
+        fi
+        
+        # Check if directory exists
+        if [ ! -d "$dir" ]; then
+            echo "Warning: Directory '$dir' does not exist - skipping"
+            continue
+        fi
+        
+        # Check if directory is accessible
+        if [ ! -r "$dir" ]; then
+            echo "Warning: Directory '$dir' is not readable - skipping"
+            continue
+        fi
+        
+        # Add to valid directories
+        VALID_DIRS+=("$dir")
+        echo "  ✓ Added: $dir"
+    done
+    
+    # Check if we have at least one valid directory
+    if [ ${#VALID_DIRS[@]} -eq 0 ]; then
+        echo "ERROR: No valid directories found!"
+        echo "Please ensure at least one directory is mounted and accessible."
+        echo "Set PROJECT_DIRS with comma or space-separated paths, e.g.:"
+        echo "  PROJECT_DIRS=\"/projects/app1 /projects/app2\""
+        echo "  PROJECT_DIRS=\"/workspace,/data,/configs\""
         exit 1
     fi
     
-    if [ -z "$(ls -A /projects)" ]; then
-        echo "ERROR: /projects directory is empty!"
-        echo "No project directories have been mounted. Please mount at least one directory to /projects."
-        exit 1
-    fi
-    
-    echo "Found project directories in /projects:"
-    ls -la /projects/
+    echo "Configured ${#VALID_DIRS[@]} project director(y|ies):"
+    printf '  - %s\n' "${VALID_DIRS[@]}"
 }
 
-# Build MCP server command
+# Check if directories are not empty (at least one should have content)
+check_directories_content() {
+    local has_content=false
+    
+    for dir in "${VALID_DIRS[@]}"; do
+        if [ -n "$(ls -A "$dir" 2>/dev/null)" ]; then
+            has_content=true
+            echo "Directory '$dir' contains files/subdirectories"
+        else
+            echo "Warning: Directory '$dir' is empty"
+        fi
+    done
+    
+    if [ "$has_content" = false ]; then
+        echo "WARNING: All project directories are empty!"
+        echo "The server will start but may have limited functionality."
+        echo "Consider mounting directories with actual content."
+    fi
+}
+
+# Build MCP server command with multiple directories
 build_mcp_server_cmd() {
-    MCP_SERVER_CMD="npx -y @modelcontextprotocol/server-filesystem /projects"
+    # Start with the base command
+    local cmd="npx -y @modelcontextprotocol/server-filesystem"
+    
+    # Add all valid directories as arguments
+    for dir in "${VALID_DIRS[@]}"; do
+        cmd="$cmd $dir"
+    done
+    
+    MCP_SERVER_CMD="$cmd"
 }
 
 # Validate CORS patterns
@@ -207,6 +292,7 @@ main() {
     [[ -n "${PORT:-}" ]] && PORT=$(trim "$PORT")
     [[ -n "${PROTOCOL:-}" ]] && PROTOCOL=$(trim "$PROTOCOL")
     [[ -n "${CORS:-}" ]] && CORS=$(trim "$CORS")
+    [[ -n "${PROJECT_DIRS:-}" ]] && PROJECT_DIRS=$(trim "$PROJECT_DIRS")
 
     # First run handling
     if [[ ! -f "$FIRST_RUN_FILE" ]]; then
@@ -215,15 +301,16 @@ main() {
 
     # Validate configurations
     validate_port
+    validate_project_dirs
     validate_cors
     
-    # Check projects directory
-    check_projects_directory
+    # Check directories content
+    check_directories_content
 
     # Build MCP server command
     build_mcp_server_cmd
 
-    # Generate client configuration example if auto-approve is enabled
+    # Generate client configuration example
     generate_client_config_example
 
     # Protocol selection
@@ -261,6 +348,7 @@ main() {
         *)
             # Normal execution
             echo "Launching Filesystem MCP Server with protocol: $PROTOCOL_DISPLAY on port: $PORT"
+            echo "Project directories: ${VALID_DIRS[*]}"
             
             # Check for npx availability
             if ! command -v npx &>/dev/null; then
