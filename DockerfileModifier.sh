@@ -76,19 +76,22 @@ EOF
         fi
 
         cat << EOF
-# Use an ARG for the default port
+# Use ARGs for configurable defaults
 ARG PORT=8015
+ARG PROJECT_DIRS=/projects
 
-# Set an ENV variable from the ARG for runtime
+# Set ENV variables from ARGs for runtime
 ENV PORT=\${PORT}
+ENV PROJECT_DIRS=\${PROJECT_DIRS}
 
 # Expose the port
 EXPOSE \${PORT}
 
-# Create projects directory with proper ownership
+# Create default projects directory with proper ownership
+# Note: Actual directory will be created/validated at runtime based on PROJECT_DIR env var
 RUN mkdir -p /projects && chown node:node /projects
 
-# Set working directory to /projects
+# Set working directory to default project directory
 WORKDIR /projects
 
 # Health check using nc (netcat) to check if the port is open
