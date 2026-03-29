@@ -2,7 +2,7 @@
 set -ex
 # Set variables first
 REPO_NAME='filesystem-mcp'
-BASE_IMAGE=$(cat ./build_data/base-image 2>/dev/null || echo "node:alpine")
+BASE_IMAGE=$(cat ./build_data/base-image 2>/dev/null || echo "node:current-alpine")
 FILESYSTEM_MCP_VERSION=$(cat ./build_data/version 2>/dev/null || exit 1)
 SUPERGATEWAY_REPO=$(cat ./build_data/supergateway_repo 2>/dev/null || echo "supergateway")
 SUPERGATEWAY_VERSION=$(cat ./build_data/supergateway_version 2>/dev/null || echo "latest")
