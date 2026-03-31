@@ -1,16 +1,13 @@
 #!/bin/bash
-set -ex
+set -euxo pipefail
 # Set variables first
 REPO_NAME='filesystem-mcp'
 BASE_IMAGE=$(cat ./build_data/base-image 2>/dev/null || echo "node:current-alpine")
-FILESYSTEM_MCP_VERSION=$(cat ./build_data/version 2>/dev/null || exit 1)
-SUPERGATEWAY_REPO=$(cat ./build_data/supergateway_repo 2>/dev/null || echo "supergateway")
-SUPERGATEWAY_VERSION=$(cat ./build_data/supergateway_version 2>/dev/null || echo "latest")
-FILESYSTEM_MCP_REPO="@modelcontextprotocol/server-filesystem"
-FILESYSTEM_MCP_PKG="${FILESYSTEM_MCP_REPO}@${FILESYSTEM_MCP_VERSION}"
-SUPERGATEWAY_PKG="${SUPERGATEWAY_REPO}@${SUPERGATEWAY_VERSION}"
+HAPROXY_IMAGE=$(cat ./build_data/haproxy-image 2>/dev/null || echo "haproxy:lts-alpine")
+FILESYSTEM_VERSION=$(cat ./build_data/version 2>/dev/null || exit 1)
+FILESYSTEM_MCP_PKG="@modelcontextprotocol/server-filesystem@${FILESYSTEM_VERSION}"
+SUPERGATEWAY_PKG='supergateway@latest'
 DOCKERFILE_NAME="Dockerfile.$REPO_NAME"
-OTHER_NPM_DEPENDENCIES=$(cat ./build_data/npm_dependencies 2>/dev/null || echo "")
 
 # Create a temporary file safely
 TEMP_FILE=$(mktemp "${DOCKERFILE_NAME}.XXXXXX") || {
@@ -23,13 +20,16 @@ if [ -e ./build_data/publication ]; then
     # For publication builds, create a minimal Dockerfile that just tags the existing image
     {
         echo "ARG BASE_IMAGE=$BASE_IMAGE"
+        echo "ARG FILESYSTEM_VERSION=$FILESYSTEM_VERSION"
         echo "FROM $BASE_IMAGE"
     } > "$TEMP_FILE"
 else
     # Write the Dockerfile content to the temporary file first
     {
         echo "ARG BASE_IMAGE=$BASE_IMAGE"
+        echo "ARG FILESYSTEM_VERSION=$FILESYSTEM_VERSION"
         cat << EOF
+FROM $HAPROXY_IMAGE AS haproxy-src
 FROM $BASE_IMAGE AS build
 
 # Author info:
@@ -38,65 +38,55 @@ LABEL org.opencontainers.image.source="https://github.com/mekayelanik/filesystem
 
 # Copy the entrypoint script into the container and make it executable
 COPY ./resources/ /usr/local/bin/
-RUN chmod +x /usr/local/bin/entrypoint.sh /usr/local/bin/banner.sh
+RUN chmod +x /usr/local/bin/entrypoint.sh /usr/local/bin/banner.sh \
+    && if [ -f /usr/local/bin/build-timestamp.txt ]; then chmod +r /usr/local/bin/build-timestamp.txt; fi \
+    && mkdir -p /etc/haproxy \
+    && mv -vf /usr/local/bin/haproxy.cfg.template /etc/haproxy/haproxy.cfg.template \
+    && ls -la /etc/haproxy/haproxy.cfg.template
 
 # Install required APK packages
 RUN echo "https://dl-cdn.alpinelinux.org/alpine/edge/main" > /etc/apk/repositories && \
     echo "https://dl-cdn.alpinelinux.org/alpine/edge/community" >> /etc/apk/repositories && \
-    apk --update-cache --no-cache add bash shadow su-exec tzdata && \
+    apk --update-cache --no-cache add bash shadow su-exec tzdata haproxy netcat-openbsd openssl && \
     rm -rf /var/cache/apk/*
 
-# Create node user with specific UID/GID if they don't exist
-RUN if ! id -u node >/dev/null 2>&1; then \
-        addgroup -g 1000 node && \
-        adduser -u 1000 -G node -D node; \
-    fi
+# HAProxy with native QUIC/H3 support from official image
+COPY --from=haproxy-src /usr/local/sbin/haproxy /usr/sbin/haproxy
+RUN mkdir -p /usr/local/sbin && ln -sf /usr/sbin/haproxy /usr/local/sbin/haproxy
 
-# Install Filesystem MCP server
-RUN echo "Installing Filesystem MCP server: ${FILESYSTEM_MCP_PKG}" && \
-    npm install -g ${FILESYSTEM_MCP_PKG} --loglevel verbose && \
-    echo "Package installed successfully"
+# Check if package exists before installing
+RUN echo "Checking if package exists: ${FILESYSTEM_MCP_PKG}" && \
+    if npm view ${FILESYSTEM_MCP_PKG} >/dev/null 2>&1; then \
+        echo "Package found, installing..." && \
+        npm install -g ${FILESYSTEM_MCP_PKG} --omit=dev --no-audit --no-fund --loglevel error && \
+        echo "Package installed successfully"; \
+    else \
+        echo "ERROR: Package ${FILESYSTEM_MCP_PKG} not found in registry!" >&2; \
+        echo "Available versions:" && \
+        npm view @modelcontextprotocol/server-filesystem versions --json | tr -d '\[\],' | tr '"' '\n' | grep -v '^$' | head -10; \
+        exit 1; \
+    fi
 
 # Install Supergateway
 RUN echo "Installing Supergateway..." && \
-    npm install -g ${SUPERGATEWAY_PKG} --loglevel verbose && \
-    npm cache clean --force
+    npm install -g ${SUPERGATEWAY_PKG} --omit=dev --no-audit --no-fund --loglevel error && \
+    npm cache clean --force && \
+    rm -rf /root/.npm /tmp/* /var/tmp/* && \
+    rm -rf /usr/local/lib/node_modules/npm/man /usr/local/lib/node_modules/npm/docs /usr/local/lib/node_modules/npm/html
 
-EOF
+# Use an ARG for the default port
+ARG PORT=8010
 
-        # Add Other NPM Dependencies if they exist
-        if [ -n "$OTHER_NPM_DEPENDENCIES" ]; then
-            cat << EOF
-# Install Other NPM Dependencies
-RUN echo "Installing other NPM Dependencies: ${OTHER_NPM_DEPENDENCIES}" && \
-    npm install -g ${OTHER_NPM_DEPENDENCIES} --loglevel verbose && \
-    echo "Packages installed successfully"
+# Add ARG for API key
+ARG API_KEY=""
 
-EOF
-        fi
-
-        cat << EOF
-# Use ARGs for configurable defaults
-ARG PORT=8015
-ARG PROJECT_DIRS=/projects
-
-# Set ENV variables from ARGs for runtime
+# Set an ENV variable from the ARG for runtime
 ENV PORT=\${PORT}
-ENV PROJECT_DIRS=\${PROJECT_DIRS}
+ENV API_KEY=\${API_KEY}
 
-# Expose the port
-EXPOSE \${PORT}
-
-# Create default projects directory with proper ownership
-# Note: Actual directory will be created/validated at runtime based on PROJECT_DIR env var
-RUN mkdir -p /projects && chown node:node /projects
-
-# Set working directory to default project directory
-WORKDIR /projects
-
-# Health check using nc (netcat) to check if the port is open
+# L7 health check: auto-detects HTTP/HTTPS via ENABLE_HTTPS env var
 HEALTHCHECK --interval=30s --timeout=10s --start-period=10s --retries=3 \\
-    CMD nc -z localhost \${PORT:-8015} || exit 1
+    CMD sh -c 'wget -q --spider --no-check-certificate \$([ "\$ENABLE_HTTPS" = "true" ] && echo https || echo http)://127.0.0.1:\${PORT:-8015}/healthz'
 
 # Set the entrypoint
 ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]

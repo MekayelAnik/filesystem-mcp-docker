@@ -1,0 +1,59 @@
+global
+    log stdout format raw local0
+    maxconn 4096
+    tune.ssl.default-dh-param 2048
+
+defaults
+    log     global
+    mode    http
+    option  httplog
+    option  dontlognull
+    timeout connect 5000
+    timeout client  50000
+    timeout server  50000
+    timeout tunnel  1h
+    option  forwardfor
+    option  http-server-close
+
+# Frontend - receives all incoming requests
+frontend mcp_frontend
+    bind *:__SERVER_PORT__ __BIND_PARAMS__
+    __QUIC_BIND_LINE__
+
+    # Define ACL for health check endpoint from localhost
+    acl is_health_check path /healthz
+    acl is_localhost src 127.0.0.1 ::1
+
+    # Define ACL that's always false (for CORS disabled scenario)
+    acl always_false always_false
+
+    # Extract Authorization header
+    http-request set-var(txn.auth_header) req.hdr(Authorization)
+
+    # Extract Origin header for CORS validation
+    http-request set-var(txn.origin) req.hdr(Origin)
+
+    __CORS_CHECK__
+
+    # Handle CORS preflight (OPTIONS) requests BEFORE auth (browsers don't send credentials on preflight)
+    http-request return status 204 hdr "Access-Control-Allow-Origin" "%[var(txn.origin)]" hdr "Access-Control-Allow-Methods" "GET, POST, PUT, DELETE, OPTIONS" hdr "Access-Control-Allow-Headers" "Authorization, Content-Type, X-Requested-With" hdr "Access-Control-Max-Age" "86400" if METH_OPTIONS __CORS_PREFLIGHT_CONDITION__
+
+    # Skip API key check only for health check from localhost
+    __API_KEY_CHECK__
+
+    # Add CORS headers to all responses
+    http-response set-header Access-Control-Allow-Origin "%[var(txn.origin)]" if __CORS_RESPONSE_CONDITION__
+    http-response set-header Access-Control-Allow-Credentials "true" if __CORS_RESPONSE_CONDITION__
+
+    # Security headers
+    http-response set-header X-Content-Type-Options "nosniff"
+    http-response set-header X-Frame-Options "DENY"
+    http-response set-header Strict-Transport-Security "max-age=31536000; includeSubDomains" if { ssl_fc }
+
+    # Route to backend
+    default_backend mcp_backend
+
+# Backend - forwards to the actual MCP server
+backend mcp_backend
+    balance roundrobin
+    server __SERVER_NAME__ 127.0.0.1:__INTERNAL_PORT__ check
