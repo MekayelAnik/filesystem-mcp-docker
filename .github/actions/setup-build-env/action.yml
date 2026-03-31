@@ -104,7 +104,14 @@ runs:
       shell: bash
       run: |
         set -euo pipefail
+        ARCH="$(uname -m)"
+        case "$ARCH" in
+          x86_64)        CRANE_ARCH="x86_64" ;;
+          aarch64|arm64) CRANE_ARCH="arm64" ;;
+          riscv64)       CRANE_ARCH="riscv64" ;;
+          *)             echo "crane: unsupported arch $ARCH, skipping"; exit 0 ;;
+        esac
         CRANE_VERSION="$(curl -fsSL https://api.github.com/repos/google/go-containerregistry/releases/latest | jq -r .tag_name)"
-        curl -fsSL "https://github.com/google/go-containerregistry/releases/download/${CRANE_VERSION}/go-containerregistry_Linux_x86_64.tar.gz" \
+        curl -fsSL "https://github.com/google/go-containerregistry/releases/download/${CRANE_VERSION}/go-containerregistry_Linux_${CRANE_ARCH}.tar.gz" \
           | tar xzf - -C /usr/local/bin crane
-        echo "Installed crane ${CRANE_VERSION}"
+        echo "Installed crane ${CRANE_VERSION} (${CRANE_ARCH})"
