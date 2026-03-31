@@ -96,10 +96,11 @@ jobs:
           set -euo pipefail
 
           VERSIONS_JSON='${{ inputs.versions_json }}'
-          PLATFORMS='[
-            {"platform":"linux/amd64","runner":"ubuntu-latest","slug":"amd64"},
-            {"platform":"linux/arm64","runner":"ubuntu-24.04-arm","slug":"arm64"}
-          ]'
+          ARM_RUNNER="ubuntu-${{ vars.RUNNER_UBUNTU_VERSION || '24.04' }}-arm"
+          PLATFORMS="[
+            {\"platform\":\"linux/amd64\",\"runner\":\"ubuntu-latest\",\"slug\":\"amd64\"},
+            {\"platform\":\"linux/arm64\",\"runner\":\"${ARM_RUNNER}\",\"slug\":\"arm64\"}
+          ]"
 
           # Cross-product: each version × each platform
           MATRIX=$(echo "$VERSIONS_JSON" | jq -c --argjson platforms "$PLATFORMS" '
