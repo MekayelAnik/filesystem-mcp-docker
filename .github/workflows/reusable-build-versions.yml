@@ -191,7 +191,7 @@ jobs:
           cache-from: type=gha,scope=filesystem-${{ matrix.version }}
             ${{ steps.sanitize.outputs.dockerhub_repo }}:${{ matrix.image_tag }}
             ${{ steps.sanitize.outputs.dockerhub_repo }}:${{ matrix.version }}
-          cache-to: type=gha,scope=filesystem-${{ matrix.version }},mode=max
+          cache-to: type=gha,scope=filesystem-${{ matrix.version }},mode=max,compression=zstd
             ${{ steps.sanitize.outputs.dockerhub_repo }}:${{ matrix.image_tag }}
             ${{ steps.sanitize.outputs.dockerhub_repo }}:${{ matrix.version }}
           outputs: type=registry,oci-mediatypes=true,${{ steps.profile.outputs.compression_params }},export-cache-concurrency=${{ inputs.export_cache_concurrency }},export-layers-concurrency=${{ inputs.export_layers_concurrency }}
