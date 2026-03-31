@@ -55,7 +55,8 @@ COPY --from=haproxy-src /usr/local/sbin/haproxy /usr/sbin/haproxy
 RUN mkdir -p /usr/local/sbin && ln -sf /usr/sbin/haproxy /usr/local/sbin/haproxy
 
 # Check if package exists before installing
-RUN echo "Checking if package exists: ${FILESYSTEM_MCP_PKG}" && \
+RUN --mount=type=cache,target=/root/.npm \
+    echo "Checking if package exists: ${FILESYSTEM_MCP_PKG}" && \
     if npm view ${FILESYSTEM_MCP_PKG} >/dev/null 2>&1; then \
         echo "Package found, installing..." && \
         npm install -g ${FILESYSTEM_MCP_PKG} --omit=dev --no-audit --no-fund --loglevel error && \
@@ -68,10 +69,11 @@ RUN echo "Checking if package exists: ${FILESYSTEM_MCP_PKG}" && \
     fi
 
 # Install Supergateway
-RUN echo "Installing Supergateway..." && \
+RUN --mount=type=cache,target=/root/.npm \
+    echo "Installing Supergateway..." && \
     npm install -g ${SUPERGATEWAY_PKG} --omit=dev --no-audit --no-fund --loglevel error && \
-    npm cache clean --force && \
-    rm -rf /root/.npm /tmp/* /var/tmp/* && \
+    
+    rm -rf /tmp/* /var/tmp/* && \
     rm -rf /usr/local/lib/node_modules/npm/man /usr/local/lib/node_modules/npm/docs /usr/local/lib/node_modules/npm/html
 
 # Use an ARG for the default port
