@@ -35,7 +35,7 @@ on:
         required: true
         type: string
       default_platforms:
-        description: Build platforms
+        description: Build platforms (informational — actual platforms defined in matrix)
         required: true
         type: string
       export_cache_concurrency:
@@ -81,17 +81,59 @@ permissions:
   packages: write
 
 jobs:
-  build-versions:
-    name: Build ${{ matrix.version }}
+  # ── Prepare cross-product matrix: versions × platforms ──
+  prepare-matrix:
+    name: Prepare build matrix
     runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.generate.outputs.matrix }}
+      versions: ${{ steps.generate.outputs.versions }}
+    steps:
+      - name: Generate version × platform matrix
+        id: generate
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          VERSIONS_JSON='${{ inputs.versions_json }}'
+          PLATFORMS='[
+            {"platform":"linux/amd64","runner":"ubuntu-latest","slug":"amd64"},
+            {"platform":"linux/arm64","runner":"ubuntu-24.04-arm","slug":"arm64"}
+          ]'
+
+          # Cross-product: each version × each platform
+          MATRIX=$(echo "$VERSIONS_JSON" | jq -c --argjson platforms "$PLATFORMS" '
+            [.[] as $v | $platforms[] as $p | {
+              version: $v.version,
+              image_tag: $v.image_tag,
+              promote_latest: $v.promote_latest,
+              platform: $p.platform,
+              runner: $p.runner,
+              slug: $p.slug
+            }]
+          ')
+
+          # Deduplicated version list for merge job
+          VERSIONS=$(echo "$VERSIONS_JSON" | jq -c '[.[] | {version, image_tag, promote_latest}]')
+
+          echo "matrix={\"include\":$MATRIX}" >> "$GITHUB_OUTPUT"
+          echo "versions={\"include\":$VERSIONS}" >> "$GITHUB_OUTPUT"
+
+          COUNT=$(echo "$MATRIX" | jq length)
+          echo "Generated $COUNT build jobs (versions × platforms)"
+
+  # ── Per-platform native build (no QEMU for amd64/arm64) ──
+  build-platform:
+    name: Build ${{ matrix.version }} (${{ matrix.slug }})
+    needs: [prepare-matrix]
+    runs-on: ${{ matrix.runner }}
     concurrency:
-      group: build-${{ matrix.version }}
+      group: build-${{ matrix.version }}-${{ matrix.slug }}
       cancel-in-progress: false
     strategy:
       fail-fast: false
-      max-parallel: 4
-      matrix:
-        include: ${{ fromJson(inputs.versions_json) }}
+      max-parallel: 8
+      matrix: ${{ fromJson(needs.prepare-matrix.outputs.matrix) }}
 
     steps:
       - name: Sanitize inputs (trim whitespace)
@@ -102,7 +144,6 @@ jobs:
           trim() { local v="$*"; v="${v#"${v%%[![:space:]]*}"}"; v="${v%"${v##*[![:space:]]}"}" ; printf '%s' "$v"; }
           echo "ghcr_repo=$(trim '${{ inputs.ghcr_repo }}')" >> "$GITHUB_OUTPUT"
           echo "dockerhub_repo=$(trim '${{ inputs.dockerhub_repo }}')" >> "$GITHUB_OUTPUT"
-          echo "default_platforms=$(trim '${{ inputs.default_platforms }}')" >> "$GITHUB_OUTPUT"
           echo "base_image_default=$(trim '${{ inputs.base_image_default }}')" >> "$GITHUB_OUTPUT"
           echo "haproxy_image=$(trim '${{ inputs.haproxy_image }}')" >> "$GITHUB_OUTPUT"
 
@@ -119,7 +160,7 @@ jobs:
         uses: ./.github/actions/setup-build-env
         with:
           do_checkout: 'false'
-          setup_qemu: 'true'
+          setup_qemu: 'false'
           setup_buildx: 'true'
           login_dockerhub: 'true'
           login_ghcr: 'true'
@@ -135,8 +176,6 @@ jobs:
           set -euo pipefail
 
           RESULT="$({ FORCE_BUILD="${{ inputs.force_build }}" GHCR_REPO="${{ steps.sanitize.outputs.ghcr_repo }}" VERSION="${{ matrix.version }}" bash .github/scripts/check-existing-tags.sh; } )"
-            ${{ steps.sanitize.outputs.dockerhub_repo }}:${{ matrix.image_tag }}
-            ${{ steps.sanitize.outputs.dockerhub_repo }}:${{ matrix.version }}
           echo "$RESULT"
           SKIP_LINE="$(echo "$RESULT" | awk -F= '/^skip_build=/{print $0}' | tail -n1)"
           if [[ -z "$SKIP_LINE" ]]; then
@@ -157,7 +196,6 @@ jobs:
           # Resolve HAProxy image with fallback: try GHCR mirror, fall back to Docker Hub
           HAPROXY_IMG="${{ steps.sanitize.outputs.haproxy_image }}"
           if ! crane digest "$HAPROXY_IMG" >/dev/null 2>&1; then
-            # Strip GHCR prefix (ghcr.io/<owner>/base-images/<image>:<tag> → <image>:<tag>)
             HAPROXY_FALLBACK="${HAPROXY_IMG##*/}"
             echo "HAProxy image '$HAPROXY_IMG' not available, falling back to '$HAPROXY_FALLBACK'"
             HAPROXY_IMG="$HAPROXY_FALLBACK"
@@ -170,7 +208,8 @@ jobs:
           bash ./DockerfileModifier.sh
           test -f ./Dockerfile.filesystem-mcp
 
-      - name: Build and push image
+      - name: Build and push by digest
+        id: build
         if: steps.check-existing.outputs.skip_build != 'true'
         env:
           BUILDKIT_STEP_LOG_MAX_SIZE: ${{ inputs.buildkit_step_log_max_size }}
@@ -181,20 +220,10 @@ jobs:
         with:
           context: .
           file: ./Dockerfile.filesystem-mcp
-          push: true
-          platforms: ${{ steps.sanitize.outputs.default_platforms }}
-          tags: |
-            ${{ steps.sanitize.outputs.ghcr_repo }}:${{ matrix.image_tag }}
-            ${{ steps.sanitize.outputs.ghcr_repo }}:${{ matrix.version }}
-            ${{ steps.sanitize.outputs.dockerhub_repo }}:${{ matrix.image_tag }}
-            ${{ steps.sanitize.outputs.dockerhub_repo }}:${{ matrix.version }}
-          cache-from: type=gha,scope=filesystem-${{ matrix.version }}
-            ${{ steps.sanitize.outputs.dockerhub_repo }}:${{ matrix.image_tag }}
-            ${{ steps.sanitize.outputs.dockerhub_repo }}:${{ matrix.version }}
-          cache-to: type=gha,scope=filesystem-${{ matrix.version }},mode=max,compression=zstd
-            ${{ steps.sanitize.outputs.dockerhub_repo }}:${{ matrix.image_tag }}
-            ${{ steps.sanitize.outputs.dockerhub_repo }}:${{ matrix.version }}
-          outputs: type=registry,oci-mediatypes=true,${{ steps.profile.outputs.compression_params }},export-cache-concurrency=${{ inputs.export_cache_concurrency }},export-layers-concurrency=${{ inputs.export_layers_concurrency }}
+          platforms: ${{ matrix.platform }}
+          outputs: type=image,name=${{ steps.sanitize.outputs.ghcr_repo }},push-by-digest=true,name-canonical=true,push=true,oci-mediatypes=true,${{ steps.profile.outputs.compression_params }},export-cache-concurrency=${{ inputs.export_cache_concurrency }},export-layers-concurrency=${{ inputs.export_layers_concurrency }}
+          cache-from: type=gha,scope=filesystem-${{ matrix.version }}-${{ matrix.slug }}
+          cache-to: type=gha,scope=filesystem-${{ matrix.version }}-${{ matrix.slug }},mode=max,compression=zstd
           build-args: |
             BUILDKIT_INLINE_CACHE=1
             FILESYSTEM_VERSION=${{ matrix.version }}
@@ -202,8 +231,108 @@ jobs:
           provenance: false
           sbom: false
 
-      - name: Verify Docker Hub parity (fallback sync if dual-push missed DH)
+      - name: Export digest
         if: steps.check-existing.outputs.skip_build != 'true'
+        shell: bash
+        run: |
+          mkdir -p /tmp/digests
+          digest="${{ steps.build.outputs.digest }}"
+          echo "Platform ${{ matrix.slug }} digest: $digest"
+          echo "$digest" > "/tmp/digests/${{ matrix.slug }}"
+
+      - name: Upload digest
+        if: steps.check-existing.outputs.skip_build != 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: digest-${{ matrix.version }}-${{ matrix.slug }}
+          path: /tmp/digests/${{ matrix.slug }}
+          if-no-files-found: error
+          retention-days: 1
+
+  # ── Merge per-platform digests into multi-arch manifest ──
+  merge-manifest:
+    name: Merge ${{ matrix.version }}
+    needs: [prepare-matrix, build-platform]
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJson(needs.prepare-matrix.outputs.versions) }}
+
+    steps:
+      - name: Sanitize inputs
+        id: sanitize
+        shell: bash
+        run: |
+          set -euo pipefail
+          trim() { local v="$*"; v="${v#"${v%%[![:space:]]*}"}"; v="${v%"${v##*[![:space:]]}"}" ; printf '%s' "$v"; }
+          echo "ghcr_repo=$(trim '${{ inputs.ghcr_repo }}')" >> "$GITHUB_OUTPUT"
+          echo "dockerhub_repo=$(trim '${{ inputs.dockerhub_repo }}')" >> "$GITHUB_OUTPUT"
+
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup build environment
+        uses: ./.github/actions/setup-build-env
+        with:
+          do_checkout: 'false'
+          setup_qemu: 'false'
+          setup_buildx: 'true'
+          login_dockerhub: 'true'
+          login_ghcr: 'true'
+          dockerhub_username: ${{ secrets.DOCKERHUB_USERNAME }}
+          dockerhub_token: ${{ secrets.DOCKERHUB_TOKEN }}
+          ghcr_actor: ${{ github.actor }}
+          ghcr_token: ${{ github.token }}
+
+      - name: Download all platform digests
+        uses: actions/download-artifact@v4
+        with:
+          path: /tmp/digests
+          pattern: digest-${{ matrix.version }}-*
+          merge-multiple: true
+
+      - name: Create multi-arch manifest and push tags
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          GHCR_REPO="${{ steps.sanitize.outputs.ghcr_repo }}"
+          DH_REPO="${{ steps.sanitize.outputs.dockerhub_repo }}"
+          VERSION="${{ matrix.version }}"
+          IMAGE_TAG="${{ matrix.image_tag }}"
+
+          echo "Merging platform digests for $VERSION"
+          ls -la /tmp/digests/
+
+          # Collect all digest sources
+          SOURCES=""
+          for f in /tmp/digests/*; do
+            DIGEST="$(cat "$f")"
+            SLUG="$(basename "$f")"
+            echo "  $SLUG: $DIGEST"
+            SOURCES+="${GHCR_REPO}@${DIGEST} "
+          done
+
+          if [[ -z "$SOURCES" ]]; then
+            echo "No digests found — skipping manifest merge"
+            exit 0
+          fi
+
+          echo "Creating multi-arch manifest with tags:"
+          echo "  GHCR: $GHCR_REPO:$VERSION, $GHCR_REPO:$IMAGE_TAG"
+          echo "  DH:   $DH_REPO:$VERSION, $DH_REPO:$IMAGE_TAG"
+
+          # Create manifest list with all tags (GHCR + Docker Hub)
+          docker buildx imagetools create \
+            -t "${GHCR_REPO}:${VERSION}" \
+            -t "${GHCR_REPO}:${IMAGE_TAG}" \
+            -t "${DH_REPO}:${VERSION}" \
+            -t "${DH_REPO}:${IMAGE_TAG}" \
+            $SOURCES
+
+          echo "Multi-arch manifest created successfully"
+
+      - name: Verify Docker Hub parity (fallback sync)
         uses: ./.github/actions/registry-sync
         with:
           dockerhub_repo: ${{ steps.sanitize.outputs.dockerhub_repo }}
