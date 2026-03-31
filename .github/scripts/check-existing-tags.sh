@@ -15,11 +15,20 @@ if [[ "$FORCE_BUILD" == "true" ]]; then
     exit 0
 fi
 
-# Try docker manifest inspect first
-if docker manifest inspect "${GHCR_REPO}:${VERSION}" >/dev/null 2>&1; then
-    echo "Image version already present in GHCR; skipping build"
-    echo "skip_build=true"
-    exit 0
+# HEAD-only digest check via crane (single HTTP HEAD request, no manifest body download)
+# Falls back to docker manifest inspect if crane is not available
+if command -v crane >/dev/null 2>&1; then
+    if crane digest "${GHCR_REPO}:${VERSION}" >/dev/null 2>&1; then
+        echo "Image version already present in GHCR (crane HEAD check); skipping build"
+        echo "skip_build=true"
+        exit 0
+    fi
+else
+    if docker manifest inspect "${GHCR_REPO}:${VERSION}" >/dev/null 2>&1; then
+        echo "Image version already present in GHCR; skipping build"
+        echo "skip_build=true"
+        exit 0
+    fi
 fi
 
 echo "Image version not found in GHCR; building"

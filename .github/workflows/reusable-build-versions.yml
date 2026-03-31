@@ -135,6 +135,8 @@ jobs:
           set -euo pipefail
 
           RESULT="$({ FORCE_BUILD="${{ inputs.force_build }}" GHCR_REPO="${{ steps.sanitize.outputs.ghcr_repo }}" VERSION="${{ matrix.version }}" bash .github/scripts/check-existing-tags.sh; } )"
+            ${{ steps.sanitize.outputs.dockerhub_repo }}:${{ matrix.image_tag }}
+            ${{ steps.sanitize.outputs.dockerhub_repo }}:${{ matrix.version }}
           echo "$RESULT"
           SKIP_LINE="$(echo "$RESULT" | awk -F= '/^skip_build=/{print $0}' | tail -n1)"
           if [[ -z "$SKIP_LINE" ]]; then
@@ -184,12 +186,18 @@ jobs:
           tags: |
             ${{ steps.sanitize.outputs.ghcr_repo }}:${{ matrix.image_tag }}
             ${{ steps.sanitize.outputs.ghcr_repo }}:${{ matrix.version }}
+            ${{ steps.sanitize.outputs.dockerhub_repo }}:${{ matrix.image_tag }}
+            ${{ steps.sanitize.outputs.dockerhub_repo }}:${{ matrix.version }}
           cache-from: |
             type=gha,scope=filesystem-${{ matrix.version }}
             type=registry,ref=${{ steps.sanitize.outputs.ghcr_repo }}:buildcache-${{ matrix.version }}
+            ${{ steps.sanitize.outputs.dockerhub_repo }}:${{ matrix.image_tag }}
+            ${{ steps.sanitize.outputs.dockerhub_repo }}:${{ matrix.version }}
           cache-to: |
             type=gha,scope=filesystem-${{ matrix.version }},mode=max
             type=registry,ref=${{ steps.sanitize.outputs.ghcr_repo }}:buildcache-${{ matrix.version }},mode=max,compression=zstd
+            ${{ steps.sanitize.outputs.dockerhub_repo }}:${{ matrix.image_tag }}
+            ${{ steps.sanitize.outputs.dockerhub_repo }}:${{ matrix.version }}
           outputs: type=registry,oci-mediatypes=true,${{ steps.profile.outputs.compression_params }},export-cache-concurrency=${{ inputs.export_cache_concurrency }},export-layers-concurrency=${{ inputs.export_layers_concurrency }}
           build-args: |
             BUILDKIT_INLINE_CACHE=1
@@ -198,7 +206,8 @@ jobs:
           provenance: false
           sbom: false
 
-      - name: Sync Docker Hub from GHCR (secondary mirror)
+      - name: Verify Docker Hub parity (fallback sync if dual-push missed DH)
+        if: steps.check-existing.outputs.skip_build != 'true'
         uses: ./.github/actions/registry-sync
         with:
           dockerhub_repo: ${{ steps.sanitize.outputs.dockerhub_repo }}

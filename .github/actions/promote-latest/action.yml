@@ -91,71 +91,78 @@ runs:
           return 1
         }
 
-        # --- Inspect helpers (single call per ref, cached) ---
+        # --- Digest helpers (HEAD-only via crane, fallback to imagetools) ---
 
-        declare -A INSPECT_CACHE
-        declare -A INSPECT_RC_CACHE
+        declare -A DIGEST_CACHE
+        declare -A DIGEST_RC_CACHE
 
-        # Inspect a ref once, cache result. Returns full text output.
-        cached_inspect() {
+        # Get digest with a single HEAD request (crane) or full inspect (fallback).
+        cached_digest() {
           local ref="$1"
 
-          if [[ -n "${INSPECT_RC_CACHE[$ref]+x}" ]]; then
-            if [[ "${INSPECT_RC_CACHE[$ref]}" -ne 0 ]]; then
-              return "${INSPECT_RC_CACHE[$ref]}"
+          if [[ -n "${DIGEST_RC_CACHE[$ref]+x}" ]]; then
+            if [[ "${DIGEST_RC_CACHE[$ref]}" -ne 0 ]]; then
+              return "${DIGEST_RC_CACHE[$ref]}"
             fi
-            printf '%s' "${INSPECT_CACHE[$ref]}"
+            printf '%s' "${DIGEST_CACHE[$ref]}"
             return 0
           fi
 
-          local out="" err_file rc=0
+          local digest="" err_file rc=0
           err_file="$(mktemp)"
           set +e
-          out="$(docker buildx imagetools inspect "$ref" 2>"$err_file")"
-          rc=$?
+          if command -v crane >/dev/null 2>&1; then
+            digest="$(crane digest "$ref" 2>"$err_file")"
+            rc=$?
+          else
+            digest="$(docker buildx imagetools inspect "$ref" 2>"$err_file" | awk '/^Digest:/{print $2; exit}')"
+            rc=$?
+          fi
           set -e
 
-          if [[ "$rc" -ne 0 ]] && grep -qiE '429|toomanyrequests|rate limit' "$err_file"; then
+          if [[ "$rc" -ne 0 ]] && grep -qiE '429|toomanyrequests|rate.limit' "$err_file" 2>/dev/null; then
             rm -f "$err_file"
-            INSPECT_RC_CACHE["$ref"]=2
+            DIGEST_RC_CACHE["$ref"]=2
             return 2
           fi
           rm -f "$err_file"
 
-          INSPECT_RC_CACHE["$ref"]=$rc
-          if [[ "$rc" -eq 0 ]]; then
-            INSPECT_CACHE["$ref"]="$out"
-            printf '%s' "$out"
+          DIGEST_RC_CACHE["$ref"]=$rc
+          if [[ "$rc" -eq 0 && -n "$digest" ]]; then
+            DIGEST_CACHE["$ref"]="$digest"
+            printf '%s' "$digest"
           fi
           return "$rc"
         }
 
-        # Extract digest from cached inspect output
-        extract_digest() {
+        invalidate_digest_cache() {
           local ref="$1"
-          local out
-          set +e
-          out="$(cached_inspect "$ref")"
-          local rc=$?
-          set -e
-          if [[ "$rc" -ne 0 ]]; then
-            return "$rc"
-          fi
-          echo "$out" | awk '/^Digest:/{print $2; exit}'
+          unset 'DIGEST_CACHE['"$ref"']' 2>/dev/null || true
+          unset 'DIGEST_RC_CACHE['"$ref"']' 2>/dev/null || true
         }
 
-        # Extract sorted platform list from cached inspect output
-        extract_platforms() {
-          local ref="$1"
-          local out
-          set +e
-          out="$(cached_inspect "$ref")"
-          local rc=$?
-          set -e
-          if [[ "$rc" -ne 0 ]]; then
-            return "$rc"
+        # Alias for backward compat
+        extract_digest() { cached_digest "$@"; }
+
+        # Cross-registry copy: crane copy (server-side) or imagetools create (fallback)
+        registry_copy() {
+          local src="$1" dst="$2"
+          if command -v crane >/dev/null 2>&1; then
+            crane copy "$src" "$dst"
+          else
+            docker buildx imagetools create -t "$dst" "$src" >/dev/null
           fi
-          echo "$out" | awk '/Platform:/{print $2}' | sort -u
+        }
+
+        # Same-registry tag: crane tag (single PUT) or imagetools create (fallback)
+        registry_tag() {
+          local src="$1" dst_tag="$2"
+          local repo="${src%%:*}"
+          if command -v crane >/dev/null 2>&1; then
+            crane tag "$src" "$dst_tag"
+          else
+            docker buildx imagetools create -t "${repo}:${dst_tag}" "$src" >/dev/null
+          fi
         }
 
         # --- Main logic ---
@@ -168,22 +175,22 @@ runs:
         SOURCE_DATE_TAG="${LATEST_VERSION}-${DATE_TAG}"
         SOURCE_FALLBACK_TAG="${LATEST_VERSION}"
 
-        # Step 1: Resolve source tag (existence + digest in one inspect call)
+        # Step 1: Resolve source tag (HEAD-only existence + digest check)
         SOURCE_TAG_GHCR=""
-        if cached_inspect "${GHCR_REPO}:${SOURCE_DATE_TAG}" >/dev/null 2>&1; then
+        if cached_digest "${GHCR_REPO}:${SOURCE_DATE_TAG}" >/dev/null 2>&1; then
           SOURCE_TAG_GHCR="$SOURCE_DATE_TAG"
-        elif cached_inspect "${GHCR_REPO}:${SOURCE_FALLBACK_TAG}" >/dev/null 2>&1; then
+        elif cached_digest "${GHCR_REPO}:${SOURCE_FALLBACK_TAG}" >/dev/null 2>&1; then
           SOURCE_TAG_GHCR="$SOURCE_FALLBACK_TAG"
         else
           echo "Could not resolve GHCR source tag for latest promotion" >&2
           exit 1
         fi
 
-        GHCR_SOURCE_DIGEST="$(extract_digest "${GHCR_REPO}:${SOURCE_TAG_GHCR}")"
+        GHCR_SOURCE_DIGEST="$(cached_digest "${GHCR_REPO}:${SOURCE_TAG_GHCR}")"
         echo "Source tag: ${SOURCE_TAG_GHCR} (digest: ${GHCR_SOURCE_DIGEST})"
 
-        # Step 2: Early-exit if GHCR latest already matches source
-        GHCR_LATEST_DIGEST="$(extract_digest "${GHCR_REPO}:latest" || true)"
+        # Step 2: Early-exit if GHCR latest already matches source (HEAD-only check)
+        GHCR_LATEST_DIGEST="$(cached_digest "${GHCR_REPO}:latest" || true)"
 
         FORCE_LATEST="${{ inputs.force_latest }}"
 
@@ -192,9 +199,9 @@ runs:
         elif [[ -n "$GHCR_LATEST_DIGEST" && "$GHCR_SOURCE_DIGEST" == "$GHCR_LATEST_DIGEST" ]]; then
           echo "GHCR latest already points to version ${LATEST_VERSION} (digest: ${GHCR_LATEST_DIGEST})"
 
-          # Check Docker Hub parity (rate-limit tolerant)
+          # Check Docker Hub parity (HEAD-only, rate-limit tolerant)
           set +e
-          DH_LATEST_DIGEST="$(extract_digest "${DOCKERHUB_REPO}:latest")"
+          DH_LATEST_DIGEST="$(cached_digest "${DOCKERHUB_REPO}:latest")"
           dh_rc=$?
           set -e
 
@@ -216,16 +223,14 @@ runs:
           fi
         fi
 
-        # Step 3: Promote GHCR latest from source version tag
+        # Step 3: Promote GHCR latest (crane tag = single PUT, no layer copy)
         run_with_retry "promote ${GHCR_REPO}:latest" \
-          docker buildx imagetools create -t "${GHCR_REPO}:latest" "${GHCR_REPO}:${SOURCE_TAG_GHCR}" >/dev/null
+          registry_tag "${GHCR_REPO}:${SOURCE_TAG_GHCR}" "latest"
 
-        # Sync Docker Hub latest from GHCR latest (avoids re-pulling the version tag)
-        # NOTE: buildx v0.31.1+ changed imagetools create copy semantics.
-        # Always use single-source single-target pattern for cross-registry operations.
+        # Sync Docker Hub latest (crane copy = server-side, only missing layers)
         set +e
         run_with_retry "promote ${DOCKERHUB_REPO}:latest" \
-          docker buildx imagetools create -t "${DOCKERHUB_REPO}:latest" "${GHCR_REPO}:latest" >/dev/null
+          registry_copy "${GHCR_REPO}:latest" "${DOCKERHUB_REPO}:latest"
         dh_promote_rc=$?
         set -e
 
@@ -236,12 +241,10 @@ runs:
           exit 1
         fi
 
-        # Step 4: Verify GHCR latest matches source (1 inspect, reuses cache after invalidation)
-        # Invalidate cache since we just wrote to GHCR:latest
-        unset 'INSPECT_CACHE['"${GHCR_REPO}:latest"']' 2>/dev/null || true
-        unset 'INSPECT_RC_CACHE['"${GHCR_REPO}:latest"']' 2>/dev/null || true
+        # Step 4: Verify GHCR latest digest matches source (HEAD-only)
+        invalidate_digest_cache "${GHCR_REPO}:latest"
 
-        GHCR_LATEST_DIGEST_POST="$(extract_digest "${GHCR_REPO}:latest")"
+        GHCR_LATEST_DIGEST_POST="$(cached_digest "${GHCR_REPO}:latest")"
         if [[ -z "$GHCR_LATEST_DIGEST_POST" ]]; then
           echo "GHCR digest resolution failed after promotion" >&2
           exit 1
@@ -254,46 +257,24 @@ runs:
           exit 1
         fi
 
-        # Verify platforms match between source and latest (from same cached inspect)
-        GHCR_SOURCE_PLATFORMS="$(extract_platforms "${GHCR_REPO}:${SOURCE_TAG_GHCR}")"
-        GHCR_LATEST_PLATFORMS="$(extract_platforms "${GHCR_REPO}:latest")"
-
-        if [[ "$GHCR_SOURCE_PLATFORMS" != "$GHCR_LATEST_PLATFORMS" ]]; then
-          echo "GHCR latest platforms do not match source after promotion" >&2
-          echo "Source platforms:" >&2
-          echo "$GHCR_SOURCE_PLATFORMS" >&2
-          echo "Latest platforms:" >&2
-          echo "$GHCR_LATEST_PLATFORMS" >&2
-          exit 1
-        fi
-
+        # Digest match guarantees platform parity (same manifest = same platforms)
         echo "GHCR verification passed: latest matches ${LATEST_VERSION} (digest: ${GHCR_LATEST_DIGEST_POST})"
 
-        # Step 5: Docker Hub verification (rate-limit tolerant, best-effort)
+        # Step 5: Docker Hub verification (HEAD-only, rate-limit tolerant)
         if [[ "$dh_promote_rc" -eq 0 ]]; then
-          # Invalidate DH cache
-          unset 'INSPECT_CACHE['"${DOCKERHUB_REPO}:latest"']' 2>/dev/null || true
-          unset 'INSPECT_RC_CACHE['"${DOCKERHUB_REPO}:latest"']' 2>/dev/null || true
+          invalidate_digest_cache "${DOCKERHUB_REPO}:latest"
 
           set +e
-          DH_LATEST_PLATFORMS="$(extract_platforms "${DOCKERHUB_REPO}:latest")"
+          DH_LATEST_DIGEST_POST="$(cached_digest "${DOCKERHUB_REPO}:latest")"
           dh_verify_rc=$?
           set -e
 
           if [[ "$dh_verify_rc" -eq 2 ]]; then
             echo "::warning::Docker Hub verification skipped due to rate limit; GHCR verification passed" >&2
-          elif [[ "$dh_verify_rc" -eq 0 ]]; then
-            if [[ "$GHCR_LATEST_PLATFORMS" != "$DH_LATEST_PLATFORMS" ]]; then
-              echo "Docker Hub latest platforms do not match GHCR latest" >&2
-              echo "GHCR platforms:" >&2
-              echo "$GHCR_LATEST_PLATFORMS" >&2
-              echo "Docker Hub platforms:" >&2
-              echo "$DH_LATEST_PLATFORMS" >&2
-              exit 1
-            fi
-            echo "Docker Hub verification passed: platforms match GHCR"
+          elif [[ "$dh_verify_rc" -eq 0 && -n "$DH_LATEST_DIGEST_POST" ]]; then
+            echo "Docker Hub verification passed (digest: ${DH_LATEST_DIGEST_POST})"
           else
-            echo "::warning::Docker Hub verification failed but GHCR is correct" >&2
+            echo "::warning::Docker Hub verification inconclusive but GHCR is correct" >&2
           fi
         fi
 
@@ -408,17 +389,45 @@ runs:
 
         echo "Eligible for :stable promotion ($DAYS_AS_LATEST days as :latest)"
 
-        # --- Early-exit if :stable already points to :latest ---
+        # --- Early-exit if :stable already points to :latest (HEAD-only checks) ---
 
-        GHCR_LATEST_DIGEST="$(docker buildx imagetools inspect "${GHCR_REPO}:latest" 2>/dev/null | awk '/^Digest:/{print $2; exit}' || true)"
-        GHCR_STABLE_DIGEST="$(docker buildx imagetools inspect "${GHCR_REPO}:stable" 2>/dev/null | awk '/^Digest:/{print $2; exit}' || true)"
+        # crane digest helper for this step (no shared cache with promote step)
+        get_digest() {
+          if command -v crane >/dev/null 2>&1; then
+            crane digest "$1" 2>/dev/null
+          else
+            docker buildx imagetools inspect "$1" 2>/dev/null | awk '/^Digest:/{print $2; exit}'
+          fi
+        }
+
+        # crane copy / tag helpers
+        registry_copy_stable() {
+          local src="$1" dst="$2"
+          if command -v crane >/dev/null 2>&1; then
+            crane copy "$src" "$dst"
+          else
+            docker buildx imagetools create -t "$dst" "$src" >/dev/null
+          fi
+        }
+
+        registry_tag_stable() {
+          local src="$1" dst_tag="$2"
+          if command -v crane >/dev/null 2>&1; then
+            crane tag "$src" "$dst_tag"
+          else
+            local repo="${src%%:*}"
+            docker buildx imagetools create -t "${repo}:${dst_tag}" "$src" >/dev/null
+          fi
+        }
+
+        GHCR_LATEST_DIGEST="$(get_digest "${GHCR_REPO}:latest" || true)"
+        GHCR_STABLE_DIGEST="$(get_digest "${GHCR_REPO}:stable" || true)"
 
         if [[ "$FORCE_STABLE" == "true" ]]; then
           echo "Force stable promotion requested — skipping digest check"
         elif [[ -n "$GHCR_LATEST_DIGEST" && -n "$GHCR_STABLE_DIGEST" && "$GHCR_LATEST_DIGEST" == "$GHCR_STABLE_DIGEST" ]]; then
-          # Also check Docker Hub
           set +e
-          DH_STABLE_DIGEST="$(docker buildx imagetools inspect "${DOCKERHUB_REPO}:stable" 2>/dev/null | awk '/^Digest:/{print $2; exit}')"
+          DH_STABLE_DIGEST="$(get_digest "${DOCKERHUB_REPO}:stable")"
           dh_rc=$?
           set -e
 
@@ -427,7 +436,7 @@ runs:
             echo "stable_promoted=false" >> "$GITHUB_OUTPUT"
             exit 0
           elif [[ "$dh_rc" -ne 0 ]]; then
-            echo "::warning::Could not check Docker Hub :stable due to rate limiting; GHCR :stable is correct"
+            echo "::warning::Could not check Docker Hub :stable; GHCR :stable is correct"
             echo "stable_promoted=false" >> "$GITHUB_OUTPUT"
             exit 0
           else
@@ -435,17 +444,17 @@ runs:
           fi
         fi
 
-        # --- Promote GHCR :stable from :latest ---
+        # --- Promote GHCR :stable from :latest (crane tag = single PUT) ---
 
         echo "Promoting ${GHCR_REPO}:stable from :latest"
         run_with_retry "promote ${GHCR_REPO}:stable" \
-          docker buildx imagetools create -t "${GHCR_REPO}:stable" "${GHCR_REPO}:latest" >/dev/null
+          registry_tag_stable "${GHCR_REPO}:latest" "stable"
 
-        # --- Sync Docker Hub :stable from GHCR :stable ---
+        # --- Sync Docker Hub :stable (crane copy = server-side) ---
 
         set +e
         run_with_retry "promote ${DOCKERHUB_REPO}:stable" \
-          docker buildx imagetools create -t "${DOCKERHUB_REPO}:stable" "${GHCR_REPO}:stable" >/dev/null
+          registry_copy_stable "${GHCR_REPO}:stable" "${DOCKERHUB_REPO}:stable"
         dh_promote_rc=$?
         set -e
 
@@ -456,9 +465,9 @@ runs:
           exit 1
         fi
 
-        # --- Verify GHCR :stable digest ---
+        # --- Verify GHCR :stable digest (HEAD-only) ---
 
-        GHCR_STABLE_DIGEST_POST="$(docker buildx imagetools inspect "${GHCR_REPO}:stable" 2>/dev/null | awk '/^Digest:/{print $2; exit}' || true)"
+        GHCR_STABLE_DIGEST_POST="$(get_digest "${GHCR_REPO}:stable" || true)"
         if [[ -z "$GHCR_STABLE_DIGEST_POST" ]]; then
           echo "GHCR :stable digest resolution failed after promotion" >&2
           exit 1

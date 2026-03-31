@@ -38,6 +38,10 @@ inputs:
     description: GHCR token
     required: false
     default: ''
+  install_crane:
+    description: Install crane CLI for efficient registry operations
+    required: false
+    default: 'true'
 
 runs:
   using: composite
@@ -64,3 +68,13 @@ runs:
         ghcr_token: ${{ inputs.ghcr_token }}
         push_to_dockerhub: ${{ inputs.login_dockerhub }}
         push_to_ghcr: ${{ inputs.login_ghcr }}
+
+    - name: Install crane (API-efficient registry tool)
+      if: inputs.install_crane != 'false'
+      shell: bash
+      run: |
+        set -euo pipefail
+        CRANE_VERSION="$(curl -fsSL https://api.github.com/repos/google/go-containerregistry/releases/latest | jq -r .tag_name)"
+        curl -fsSL "https://github.com/google/go-containerregistry/releases/download/${CRANE_VERSION}/go-containerregistry_Linux_x86_64.tar.gz" \
+          | tar xzf - -C /usr/local/bin crane
+        echo "Installed crane ${CRANE_VERSION}"
