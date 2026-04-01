@@ -62,6 +62,7 @@ env:
   DOCKERHUB_REPO: ${{ vars.DOCKERHUB_REPO || 'mekayelanik/filesystem-mcp' }}
   GHCR_REPO: ${{ vars.GHCR_REPO || format('ghcr.io/{0}/filesystem-mcp', github.repository_owner) }}
   DEFAULT_PLATFORMS: ${{ vars.DEFAULT_PLATFORMS || 'linux/amd64,linux/arm64' }}
+  EXCLUDE_VERSIONS: ${{ vars.EXCLUDE_VERSIONS || '' }}
   BASE_IMAGE_DEFAULT: ${{ github.event.inputs.base_image || vars.BASE_IMAGE_DEFAULT || 'node:current-alpine' }}
   HAPROXY_IMAGE: ${{ vars.HAPROXY_IMAGE || 'haproxy:lts-alpine' }}
   EXPORT_CACHE_CONCURRENCY: '4'
@@ -204,6 +205,7 @@ jobs:
           NPM_PACKAGE="${NPM_PACKAGE}" \
           NPM_REGISTRY="${NPM_REGISTRY}" \
           MAX_VERSIONS="${MAX_VERSIONS}" \
+          EXCLUDE_VERSIONS="${EXCLUDE_VERSIONS}" \
           bash .github/scripts/fetch-releases.sh
 
   build-versions:

@@ -6,6 +6,7 @@ MANUAL_VERSIONS_RAW="${MANUAL_VERSIONS_RAW:-}"
 NPM_PACKAGE="${NPM_PACKAGE:-@modelcontextprotocol/server-filesystem}"
 NPM_REGISTRY="${NPM_REGISTRY:-https://registry.npmjs.org}"
 MAX_VERSIONS="${MAX_VERSIONS:-10}"
+EXCLUDE_VERSIONS="${EXCLUDE_VERSIONS:-}"
 
 if [[ -z "${GITHUB_OUTPUT:-}" ]]; then
     echo "GITHUB_OUTPUT is required" >&2
@@ -71,6 +72,32 @@ else
         LATEST_VERSION="$DIST_TAG_LATEST"
     else
         LATEST_VERSION="$(echo "$VERSIONS_NEWEST" | head -n1)"
+    fi
+fi
+
+# Filter out excluded versions (comma-separated list in EXCLUDE_VERSIONS)
+if [[ -n "$EXCLUDE_VERSIONS" ]]; then
+    EXCLUDE_PATTERN="$(echo "$EXCLUDE_VERSIONS" | tr ',' '\n' | sed 's/^ *//; s/ *$//' | sed '/^$/d' | paste -sd '|')"
+    BEFORE_COUNT="$(echo "$VERSIONS_NEWEST" | wc -l)"
+    VERSIONS_NEWEST="$(echo "$VERSIONS_NEWEST" | grep -Evx "$EXCLUDE_PATTERN" || true)"
+    AFTER_COUNT="$(echo "${VERSIONS_NEWEST:-}" | grep -c . || echo 0)"
+    if [[ "$BEFORE_COUNT" -ne "$AFTER_COUNT" ]]; then
+        echo "Excluded versions (matched $((BEFORE_COUNT - AFTER_COUNT))): $EXCLUDE_VERSIONS"
+    fi
+
+    if [[ -z "$VERSIONS_NEWEST" ]]; then
+        echo "All versions excluded — nothing to build"
+        echo "versions_json=[]" >> "$GITHUB_OUTPUT"
+        echo "latest_version=" >> "$GITHUB_OUTPUT"
+        echo "should_build=false" >> "$GITHUB_OUTPUT"
+        exit 0
+    fi
+
+    # Recalculate latest if the current one was excluded
+    if ! echo "$VERSIONS_NEWEST" | grep -qx "$LATEST_VERSION"; then
+        OLD_LATEST="$LATEST_VERSION"
+        LATEST_VERSION="$(echo "$VERSIONS_NEWEST" | sort -Vr | head -n1)"
+        echo "Latest version $OLD_LATEST was excluded — falling back to $LATEST_VERSION"
     fi
 fi
 
