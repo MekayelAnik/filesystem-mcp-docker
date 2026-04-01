@@ -102,9 +102,19 @@ jobs:
 
           VERSIONS_JSON='${{ inputs.versions_json }}'
           RUNNER_BASE="${{ inputs.runner_version || 'ubuntu-24.04' }}"
+          REQUESTED_PLATFORMS="${{ inputs.default_platforms }}"
+
+          # Build platform list: amd64 and arm64 always included,
+          # riscv64 only when listed in DEFAULT_PLATFORMS
           PLATFORMS="[
             {\"platform\":\"linux/amd64\",\"runner\":\"${RUNNER_BASE}\",\"slug\":\"amd64\"},
-            {\"platform\":\"linux/arm64\",\"runner\":\"${RUNNER_BASE}-arm\",\"slug\":\"arm64\"}
+            {\"platform\":\"linux/arm64\",\"runner\":\"${RUNNER_BASE}-arm\",\"slug\":\"arm64\"}"
+          if [[ "$REQUESTED_PLATFORMS" == *"riscv64"* ]]; then
+            PLATFORMS="${PLATFORMS},
+            {\"platform\":\"linux/riscv64\",\"runner\":\"${RUNNER_BASE}-riscv\",\"slug\":\"riscv64\"}"
+            echo "riscv64 platform enabled (found in DEFAULT_PLATFORMS)"
+          fi
+          PLATFORMS="${PLATFORMS}
           ]"
 
           # Cross-product: each version × each platform
