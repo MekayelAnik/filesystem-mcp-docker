@@ -75,6 +75,63 @@ esac
 MOCK
 chmod +x "$TMPDIR/docker"
 
+cat > "$TMPDIR/crane" <<'MOCK_CRANE'
+#!/usr/bin/env bash
+set -euo pipefail
+
+STATE_FILE="${MOCK_STATE_FILE:-}"
+if [[ -z "$STATE_FILE" || ! -f "$STATE_FILE" ]]; then
+    echo "mock state file missing" >&2
+    exit 1
+fi
+
+action="${1:-}"
+shift
+
+case "$action" in
+  digest)
+    ref="$1"
+    platforms=$(awk -F'=' -v k="$ref" '$1==k {print $2}' "$STATE_FILE")
+    if [[ -z "$platforms" ]]; then
+      exit 1
+    fi
+    echo "sha256:$(echo -n "$platforms" | sha256sum | cut -d' ' -f1)"
+    ;;
+  copy)
+    src="$1"
+    dst="$2"
+    source_platforms=$(awk -F'=' -v k="$src" '$1==k {print $2}' "$STATE_FILE")
+    if [[ -z "$source_platforms" ]]; then
+      echo "missing source ref: $src" >&2
+      exit 1
+    fi
+    tmpf="${STATE_FILE}.tmp"
+    awk -F'=' -v k="$dst" '$1!=k {print $0}' "$STATE_FILE" > "$tmpf"
+    echo "${dst}=${source_platforms}" >> "$tmpf"
+    mv "$tmpf" "$STATE_FILE"
+    ;;
+  tag)
+    src="$1"
+    dst_tag="$2"
+    repo="${src%%:*}"
+    source_platforms=$(awk -F'=' -v k="$src" '$1==k {print $2}' "$STATE_FILE")
+    if [[ -z "$source_platforms" ]]; then
+      echo "missing source ref: $src" >&2
+      exit 1
+    fi
+    tmpf="${STATE_FILE}.tmp"
+    awk -F'=' -v k="${repo}:${dst_tag}" '$1!=k {print $0}' "$STATE_FILE" > "$tmpf"
+    echo "${repo}:${dst_tag}=${source_platforms}" >> "$tmpf"
+    mv "$tmpf" "$STATE_FILE"
+    ;;
+  *)
+    echo "unexpected crane action: $action" >&2
+    exit 1
+    ;;
+esac
+MOCK_CRANE
+chmod +x "$TMPDIR/crane"
+
 run_case() {
     local name="$1"
     local tags="$2"
