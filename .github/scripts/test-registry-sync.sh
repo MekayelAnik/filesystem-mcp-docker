@@ -43,6 +43,8 @@ case "$action" in
     if [[ -z "$platforms" ]]; then
       exit 1
     fi
+    # Emit Digest line so cached_digest() can parse it (deterministic per-content hash)
+    echo "Digest: sha256:$(echo -n "$platforms" | sha256sum | cut -d' ' -f1)"
     IFS=',' read -ra arr <<< "$platforms"
     for p in "${arr[@]}"; do
       echo "Platform: $p"
@@ -103,15 +105,15 @@ run_case() {
         grep -q "dockerhub/repo:v1=linux/amd64,linux/arm64" "$state_file"
         ;;
       matching-skip)
-        grep -q "platform manifests already match across registries - skipping" "$out_file"
+        grep -q "digests match" "$out_file"
         ;;
       mismatch-sync)
-        grep -q "Syncing v1: mismatch detected, GHCR -> Docker Hub" "$out_file"
+        grep -q "Syncing v1: digest mismatch, GHCR -> Docker Hub" "$out_file"
         grep -q "dockerhub/repo:v1=linux/amd64,linux/arm64" "$state_file"
         grep -q "Synced v1 successfully" "$out_file"
         ;;
       duplicate-tags)
-        grep -q "duplicate in input list - skipping duplicate" "$out_file"
+        grep -q "duplicate - skipping" "$out_file"
         ;;
       *)
         echo "unknown test case: $name" >&2
