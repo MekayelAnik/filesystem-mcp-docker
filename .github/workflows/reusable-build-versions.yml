@@ -68,6 +68,11 @@ on:
         required: false
         type: string
         default: '1'
+      runner_version:
+        description: 'GitHub Actions runner version (e.g. ubuntu-24.04). ARM derived as {version}-arm.'
+        required: false
+        type: string
+        default: 'ubuntu-24.04'
     secrets:
       DOCKERHUB_USERNAME:
         description: Docker Hub username
@@ -84,7 +89,7 @@ jobs:
   # ── Prepare cross-product matrix: versions × platforms ──
   prepare-matrix:
     name: Prepare build matrix
-    runs-on: ubuntu-latest
+    runs-on: ${{ inputs.runner_version || 'ubuntu-latest' }}
     outputs:
       matrix: ${{ steps.generate.outputs.matrix }}
       versions: ${{ steps.generate.outputs.versions }}
@@ -96,10 +101,10 @@ jobs:
           set -euo pipefail
 
           VERSIONS_JSON='${{ inputs.versions_json }}'
-          ARM_RUNNER="ubuntu-${{ vars.RUNNER_UBUNTU_VERSION || '24.04' }}-arm"
+          RUNNER_BASE="${{ inputs.runner_version || 'ubuntu-24.04' }}"
           PLATFORMS="[
-            {\"platform\":\"linux/amd64\",\"runner\":\"ubuntu-latest\",\"slug\":\"amd64\"},
-            {\"platform\":\"linux/arm64\",\"runner\":\"${ARM_RUNNER}\",\"slug\":\"arm64\"}
+            {\"platform\":\"linux/amd64\",\"runner\":\"${RUNNER_BASE}\",\"slug\":\"amd64\"},
+            {\"platform\":\"linux/arm64\",\"runner\":\"${RUNNER_BASE}-arm\",\"slug\":\"arm64\"}
           ]"
 
           # Cross-product: each version × each platform
@@ -254,7 +259,7 @@ jobs:
   merge-manifest:
     name: Merge ${{ matrix.version }}
     needs: [prepare-matrix, build-platform]
-    runs-on: ubuntu-latest
+    runs-on: ${{ inputs.runner_version || 'ubuntu-latest' }}
     strategy:
       fail-fast: false
       matrix: ${{ fromJson(needs.prepare-matrix.outputs.versions) }}

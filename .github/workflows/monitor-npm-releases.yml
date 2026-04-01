@@ -75,7 +75,7 @@ env:
 jobs:
   quick-check:
     name: Check if pipeline run is needed
-    runs-on: ubuntu-latest
+    runs-on: ${{ vars.ACTION_RUNNER_VERSION || 'ubuntu-latest' }}
     outputs:
       should_run: ${{ steps.check.outputs.should_run }}
     steps:
@@ -139,7 +139,7 @@ jobs:
     name: Preflight checks
     needs: [quick-check]
     if: needs.quick-check.outputs.should_run == 'true'
-    runs-on: ubuntu-latest
+    runs-on: ${{ vars.ACTION_RUNNER_VERSION || 'ubuntu-latest' }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -166,7 +166,7 @@ jobs:
     name: Fetch and filter NPM releases
     needs: [quick-check]
     if: needs.quick-check.outputs.should_run == 'true'
-    runs-on: ubuntu-latest
+    runs-on: ${{ vars.ACTION_RUNNER_VERSION || 'ubuntu-latest' }}
     outputs:
       normalized_action: ${{ steps.normalize.outputs.action }}
       normalized_versions: ${{ steps.normalize.outputs.versions }}
@@ -228,6 +228,7 @@ jobs:
       buildkit_step_log_max_speed: '100000000'
       buildkit_progress: 'plain'
       docker_buildkit_inline_cache: '1'
+      runner_version: ${{ vars.ACTION_RUNNER_VERSION || 'ubuntu-24.04' }}
     secrets:
       DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
       DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
@@ -254,6 +255,7 @@ jobs:
       dockerhub_repo: ${{ vars.DOCKERHUB_REPO || 'mekayelanik/filesystem-mcp' }}
       force_latest: ${{ needs.fetch-releases.outputs.normalized_action == 'force-promote-latest' }}
       force_stable: ${{ needs.fetch-releases.outputs.normalized_action == 'promote-stable' || needs.fetch-releases.outputs.normalized_action == 'force-promote-stable' }}
+      runner_version: ${{ vars.ACTION_RUNNER_VERSION || 'ubuntu-24.04' }}
     secrets:
       DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
       DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
@@ -265,7 +267,7 @@ jobs:
       always() &&
       needs.fetch-releases.outputs.latest_version != '' &&
       (needs.promote-latest.result == 'success' || needs.promote-latest.result == 'skipped')
-    runs-on: ubuntu-latest
+    runs-on: ${{ vars.ACTION_RUNNER_VERSION || 'ubuntu-latest' }}
     steps:
       - name: Checkout state branch
         uses: actions/checkout@v4
@@ -342,7 +344,7 @@ jobs:
     if: |
       needs.promote-latest.result == 'success' &&
       needs.fetch-releases.outputs.latest_version != ''
-    runs-on: ubuntu-latest
+    runs-on: ${{ vars.ACTION_RUNNER_VERSION || 'ubuntu-latest' }}
     permissions:
       contents: write
     steps:
@@ -380,7 +382,7 @@ jobs:
     if: |
       always() &&
       needs.promote-latest.result == 'success'
-    runs-on: ubuntu-latest
+    runs-on: ${{ vars.ACTION_RUNNER_VERSION || 'ubuntu-latest' }}
     steps:
       - name: Checkout
         uses: actions/checkout@v6
