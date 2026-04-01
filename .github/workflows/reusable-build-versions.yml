@@ -301,6 +301,7 @@ jobs:
   merge-manifest:
     name: Merge ${{ matrix.version }}
     needs: [prepare-matrix, build-platform]
+    if: ${{ !cancelled() && needs.prepare-matrix.result == 'success' }}
     runs-on: ${{ inputs.runner_version || 'ubuntu-latest' }}
     strategy:
       fail-fast: false
@@ -338,6 +339,7 @@ jobs:
           path: /tmp/digests
           pattern: digest-${{ matrix.version }}-*
           merge-multiple: true
+          if-no-files-found: warn
 
       - name: Create multi-arch manifest and push tags
         shell: bash
