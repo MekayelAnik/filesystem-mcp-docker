@@ -5,9 +5,26 @@
     ":configMigration"
   ],
   "enabledManagers": [
-    "github-actions"
+    "github-actions",
+    "custom.regex"
   ],
   "pinDigests": false,
+  "github-actions": {
+    "fileMatch": [
+      "(^|/).github/workflows/[^/]+\\.ya?ml$",
+      "(^|/).github/actions/[^/]+/action\\.ya?ml$"
+    ]
+  },
+  "customManagers": [
+    {
+      "customType": "regex",
+      "description": "Track crane (go-containerregistry) pinned fallback versions",
+      "fileMatch": [".github/actions/setup-build-env/action\\.yml$"],
+      "matchStrings": ["CRANE_FALLBACK_VERSIONS=\\(\"(?<currentValue>v[\\d.]+)\""],
+      "depNameTemplate": "google/go-containerregistry",
+      "datasourceTemplate": "github-releases"
+    }
+  ],
   "labels": [
     "dependencies",
     "automated",
