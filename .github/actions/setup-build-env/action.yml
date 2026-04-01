@@ -66,7 +66,7 @@ runs:
         buildkitd-flags: --allow-insecure-entitlement network.host
         buildkitd-config-inline: |
           [dns]
-            nameservers = ["1.1.1.1", "1.0.0.1", "95.85.95.85", "2.56.220.2"]
+            nameservers = ["1.1.1.1", "76.76.2.0", "95.161.161.161", "8.8.8.8"]
             options = ["ndots:0", "attempts:2", "timeout:3"]
           [history]
             maxAge = 0
