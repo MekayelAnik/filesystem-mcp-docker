@@ -104,18 +104,50 @@ jobs:
           RUNNER_BASE="${{ inputs.runner_version || 'ubuntu-24.04' }}"
           REQUESTED_PLATFORMS="${{ inputs.default_platforms }}"
 
-          # Build platform list: amd64 and arm64 always included,
-          # riscv64 only when listed in DEFAULT_PLATFORMS
-          PLATFORMS="[
-            {\"platform\":\"linux/amd64\",\"runner\":\"${RUNNER_BASE}\",\"slug\":\"amd64\"},
-            {\"platform\":\"linux/arm64\",\"runner\":\"${RUNNER_BASE}-arm\",\"slug\":\"arm64\"}"
-          if [[ "$REQUESTED_PLATFORMS" == *"riscv64"* ]]; then
-            PLATFORMS="${PLATFORMS},
-            {\"platform\":\"linux/riscv64\",\"runner\":\"${RUNNER_BASE}-riscv\",\"slug\":\"riscv64\"}"
-            echo "riscv64 platform enabled (found in DEFAULT_PLATFORMS)"
-          fi
+          # Platform → runner affinity lookup table
+          # Format: platform|runner_suffix|slug
+          # Runner affinity: ARM32 → ARM64 runner (native compat),
+          # i386 → amd64 (native compat), others → amd64 (QEMU)
+          PLATFORM_MAP="
+          linux/amd64||amd64
+          linux/arm64|-arm|arm64
+          linux/arm/v7|-arm|armv7
+          linux/arm/v6|-arm|armv6
+          linux/riscv64|-riscv|riscv64
+          linux/386||386
+          linux/s390x||s390x
+          linux/ppc64le||ppc64le
+          linux/mips64le||mips64le
+          "
+
+          # Build platform JSON array from DEFAULT_PLATFORMS using the lookup table
+          PLATFORMS="["
+          first=true
+          IFS=',' read -ra REQUESTED <<< "$REQUESTED_PLATFORMS"
+          for req in "${REQUESTED[@]}"; do
+            req="$(echo "$req" | xargs)"
+            [[ -z "$req" ]] && continue
+            matched=false
+            while IFS='|' read -r plat suffix slug; do
+              plat="$(echo "$plat" | xargs)"
+              [[ -z "$plat" ]] && continue
+              if [[ "$req" == "$plat" ]]; then
+                $first || PLATFORMS="${PLATFORMS},"
+                first=false
+                PLATFORMS="${PLATFORMS}
+            {\"platform\":\"${plat}\",\"runner\":\"${RUNNER_BASE}${suffix}\",\"slug\":\"${slug}\"}"
+                matched=true
+                break
+              fi
+            done <<< "$PLATFORM_MAP"
+            if [[ "$matched" == "false" ]]; then
+              echo "::warning::Unknown platform '$req' — skipping (not in affinity table)"
+            fi
+          done
           PLATFORMS="${PLATFORMS}
           ]"
+
+          echo "Platforms: $(echo "$PLATFORMS" | jq -c '[ .[].platform ]')"
 
           # Cross-product: each version × each platform
           MATRIX=$(echo "$VERSIONS_JSON" | jq -c --argjson platforms "$PLATFORMS" '
@@ -138,7 +170,7 @@ jobs:
           COUNT=$(echo "$MATRIX" | jq length)
           echo "Generated $COUNT build jobs (versions × platforms)"
 
-  # ── Per-platform native build (no QEMU for amd64/arm64) ──
+  # ── Per-platform build (native or QEMU-emulated) ──
   build-platform:
     name: Build ${{ matrix.version }} (${{ matrix.slug }})
     needs: [prepare-matrix]
@@ -176,7 +208,7 @@ jobs:
         uses: ./.github/actions/setup-build-env
         with:
           do_checkout: 'false'
-          setup_qemu: 'false'
+          setup_qemu: 'true'
           setup_buildx: 'true'
           login_dockerhub: 'true'
           login_ghcr: 'true'
@@ -291,7 +323,7 @@ jobs:
         uses: ./.github/actions/setup-build-env
         with:
           do_checkout: 'false'
-          setup_qemu: 'false'
+          setup_qemu: 'true'
           setup_buildx: 'true'
           login_dockerhub: 'true'
           login_ghcr: 'true'
