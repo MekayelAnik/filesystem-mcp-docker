@@ -352,6 +352,13 @@ jobs:
           IMAGE_TAG="${{ matrix.image_tag }}"
 
           echo "Merging platform digests for $VERSION"
+
+          # Early exit if no digests directory or empty (builds were skipped)
+          if [[ ! -d /tmp/digests ]] || [[ -z "$(ls -A /tmp/digests/ 2>/dev/null)" ]]; then
+            echo "No digests found — skipping manifest merge"
+            exit 0
+          fi
+
           ls -la /tmp/digests/
 
           # Collect all digest sources
