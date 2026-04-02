@@ -25,12 +25,22 @@ on:
         description: 'Version range to build (e.g. 2025.11.25-2026.1.14). All available versions within this range will be built.'
         required: false
         type: string
-        default: '2025.11.25-2026.1.14'
+        default: ''
       force_build:
         description: Force build even if tags may already exist
         required: false
         type: boolean
         default: false
+      auto_promote:
+        description: 'Automatically promote latest tag after build completes'
+        required: false
+        type: boolean
+        default: false
+      custom_latest:
+        description: 'Override which version to promote as latest (leave empty for NPM latest)'
+        required: false
+        type: string
+        default: ''
       build_profile:
         description: Build profile
         required: false
@@ -178,8 +188,10 @@ jobs:
       normalized_versions: ${{ steps.normalize.outputs.versions }}
       normalized_version_range: ${{ steps.normalize.outputs.version_range }}
       normalized_force_build: ${{ steps.normalize.outputs.force_build }}
+      normalized_auto_promote: ${{ steps.normalize.outputs.auto_promote }}
+      normalized_custom_latest: ${{ steps.normalize.outputs.custom_latest }}
       versions_json: ${{ steps.releases.outputs.versions_json }}
-      latest_version: ${{ steps.releases.outputs.latest_version }}
+      latest_version: ${{ needs.fetch-releases.outputs.normalized_custom_latest != '' && needs.fetch-releases.outputs.normalized_custom_latest || (steps.releases.outputs.latest_version) }}
       date_tag: ${{ steps.releases.outputs.date_tag }}
       should_build: ${{ steps.releases.outputs.should_build }}
 
@@ -201,6 +213,10 @@ jobs:
           CLIENT_VERSION_RANGE="${{ github.event.client_payload.version_range || '' }}" \
           FORCE_INPUT="${{ github.event.inputs.force_build || '' }}" \
           CLIENT_FORCE="${{ github.event.client_payload.force_build || '' }}" \
+          AUTO_PROMOTE_INPUT="${{ github.event.inputs.auto_promote || '' }}" \
+          CLIENT_AUTO_PROMOTE="${{ github.event.client_payload.auto_promote || '' }}" \
+          CUSTOM_LATEST_INPUT="${{ github.event.inputs.custom_latest || '' }}" \
+          CLIENT_CUSTOM_LATEST="${{ github.event.client_payload.custom_latest || '' }}" \
           bash .github/scripts/normalize-dispatch-inputs.sh
 
       - name: Collect stable versions
@@ -248,13 +264,13 @@ jobs:
     needs: [quick-check, fetch-releases, build-versions]
     if: |
       always() &&
-      needs.fetch-releases.outputs.normalized_action != 'build-range' &&
       (needs.fetch-releases.outputs.latest_version != '' || needs.fetch-releases.outputs.normalized_action == 'force-promote-latest') &&
       (
         needs.fetch-releases.outputs.normalized_action == 'promote-latest' ||
         needs.fetch-releases.outputs.normalized_action == 'force-promote-latest' ||
         needs.fetch-releases.outputs.normalized_action == 'promote-stable' ||
         needs.fetch-releases.outputs.normalized_action == 'force-promote-stable' ||
+        (needs.build-versions.result == 'success' && needs.fetch-releases.outputs.normalized_auto_promote == 'true') ||
         (needs.build-versions.result == 'success' && contains(needs.fetch-releases.outputs.versions_json, needs.fetch-releases.outputs.latest_version)) ||
         needs.fetch-releases.outputs.normalized_action == 'auto-check'
       )
@@ -379,7 +395,6 @@ jobs:
           # Update workflow UI: version_range default and description with latest version
           WORKFLOW_FILE=".github/workflows/monitor-npm-releases.yml"
           sed -i -E "s/(Version range to build \(e\.g\. )[0-9]+\.[0-9]+\.[0-9]+-[0-9]+\.[0-9]+\.[0-9]+/\11.0.0-${LATEST}/" "$WORKFLOW_FILE"
-          sed -i -E "s/default: '[0-9]+\.[0-9]+\.[0-9]+-[0-9]+\.[0-9]+\.[0-9]+'/default: '1.0.0-${LATEST}'/" "$WORKFLOW_FILE"
 
           if git diff --quiet README.md "$WORKFLOW_FILE"; then
             echo "README already up to date"
