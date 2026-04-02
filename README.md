@@ -1,4 +1,17 @@
 # Filesystem MCP Server
+
+<p align="center">
+  <a href="https://hub.docker.com/r/mekayelanik/filesystem-mcp"><img alt="Docker Pulls" src="https://img.shields.io/docker/pulls/mekayelanik/filesystem-mcp?style=flat-square&logo=docker"></a>
+  <a href="https://hub.docker.com/r/mekayelanik/filesystem-mcp"><img alt="Docker Stars" src="https://img.shields.io/docker/stars/mekayelanik/filesystem-mcp?style=flat-square&logo=docker"></a>
+  <a href="https://github.com/mekayelanik/filesystem-mcp-docker/pkgs/container/filesystem-mcp"><img alt="GHCR" src="https://img.shields.io/badge/GHCR-ghcr.io%2Fmekayelanik%2Ffilesystem-mcp-blue?style=flat-square&logo=github"></a>
+  <a href="https://github.com/mekayelanik/filesystem-mcp-docker/blob/main/LICENSE"><img alt="License: GPL-3.0" src="https://img.shields.io/badge/License-GPL--3.0-blue?style=flat-square"></a>
+  <a href="https://hub.docker.com/r/mekayelanik/filesystem-mcp"><img alt="Platforms" src="https://img.shields.io/badge/Platforms-amd64%20%7C%20arm64-lightgrey?style=flat-square"></a>
+  <a href="https://github.com/MekayelAnik/filesystem-mcp-docker/stargazers"><img alt="GitHub Stars" src="https://img.shields.io/github/stars/MekayelAnik/filesystem-mcp-docker?style=flat-square"></a>
+  <a href="https://github.com/MekayelAnik/filesystem-mcp-docker/forks"><img alt="GitHub Forks" src="https://img.shields.io/github/forks/MekayelAnik/filesystem-mcp-docker?style=flat-square"></a>
+  <a href="https://github.com/MekayelAnik/filesystem-mcp-docker/issues"><img alt="GitHub Issues" src="https://img.shields.io/github/issues/MekayelAnik/filesystem-mcp-docker?style=flat-square"></a>
+  <a href="https://github.com/MekayelAnik/filesystem-mcp-docker/commits/main"><img alt="Last Commit" src="https://img.shields.io/github/last-commit/MekayelAnik/filesystem-mcp-docker?style=flat-square"></a>
+</p>
+
 ### Multi-Architecture Docker Image for Secure File System Access
 
 <div align="left">
