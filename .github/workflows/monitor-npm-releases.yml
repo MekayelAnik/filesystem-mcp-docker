@@ -148,7 +148,7 @@ jobs:
     runs-on: ${{ vars.ACTION_RUNNER_VERSION || 'ubuntu-latest' }}
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Validate workflow YAML
         shell: bash
@@ -185,7 +185,7 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Normalize dispatch inputs
         id: normalize
@@ -281,7 +281,7 @@ jobs:
     runs-on: ${{ vars.ACTION_RUNNER_VERSION || 'ubuntu-latest' }}
     steps:
       - name: Checkout state branch
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           ref: pipeline-state
           fetch-depth: 1
