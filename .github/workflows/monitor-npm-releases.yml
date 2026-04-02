@@ -10,6 +10,7 @@ on:
         options:
           - auto-check
           - build-versions
+          - build-range
           - promote-latest
           - force-promote-latest
           - promote-stable
@@ -17,6 +18,11 @@ on:
         default: auto-check
       versions:
         description: Optional versions to build (comma-separated). Empty = auto from NPM.
+        required: false
+        type: string
+        default: ''
+      version_range:
+        description: 'Version range to build (e.g. 2025.11.25-2026.1.14). All available versions within this range will be built.'
         required: false
         type: string
         default: ''
@@ -170,6 +176,7 @@ jobs:
     outputs:
       normalized_action: ${{ steps.normalize.outputs.action }}
       normalized_versions: ${{ steps.normalize.outputs.versions }}
+      normalized_version_range: ${{ steps.normalize.outputs.version_range }}
       normalized_force_build: ${{ steps.normalize.outputs.force_build }}
       versions_json: ${{ steps.releases.outputs.versions_json }}
       latest_version: ${{ steps.releases.outputs.latest_version }}
@@ -190,6 +197,8 @@ jobs:
           CLIENT_ACTION="${{ github.event.client_payload.action || '' }}" \
           VERSIONS_INPUT="${{ github.event.inputs.versions || '' }}" \
           CLIENT_VERSIONS="${{ github.event.client_payload.versions || '' }}" \
+          VERSION_RANGE_INPUT="${{ github.event.inputs.version_range || '' }}" \
+          CLIENT_VERSION_RANGE="${{ github.event.client_payload.version_range || '' }}" \
           FORCE_INPUT="${{ github.event.inputs.force_build || '' }}" \
           CLIENT_FORCE="${{ github.event.client_payload.force_build || '' }}" \
           bash .github/scripts/normalize-dispatch-inputs.sh
@@ -202,6 +211,7 @@ jobs:
 
           REQUESTED_ACTION="${{ steps.normalize.outputs.action }}" \
           MANUAL_VERSIONS_RAW="${{ steps.normalize.outputs.versions }}" \
+          VERSION_RANGE="${{ steps.normalize.outputs.version_range }}" \
           NPM_PACKAGE="${NPM_PACKAGE}" \
           NPM_REGISTRY="${NPM_REGISTRY}" \
           MAX_VERSIONS="${MAX_VERSIONS}" \
@@ -238,6 +248,7 @@ jobs:
     needs: [quick-check, fetch-releases, build-versions]
     if: |
       always() &&
+      needs.fetch-releases.outputs.normalized_action != 'build-range' &&
       (needs.fetch-releases.outputs.latest_version != '' || needs.fetch-releases.outputs.normalized_action == 'force-promote-latest') &&
       (
         needs.fetch-releases.outputs.normalized_action == 'promote-latest' ||
