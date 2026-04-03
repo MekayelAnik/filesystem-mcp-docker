@@ -9,20 +9,14 @@ on:
         type: choice
         options:
           - auto-check
-          - build-versions
-          - build-range
+          - build
           - promote-latest
           - force-promote-latest
           - promote-stable
           - force-promote-stable
         default: auto-check
       versions:
-        description: Optional versions to build (comma-separated). Empty = auto from NPM.
-        required: false
-        type: string
-        default: ''
-      version_range:
-        description: 'Version range to build (e.g. 2025.11.25-2026.1.14). All available versions within this range will be built.'
+        description: 'Versions to build. Comma-separated (1.4.5,1.5.3), range (1.0.0-1.5.3), or empty for auto from NPM.'
         required: false
         type: string
         default: ''
@@ -186,7 +180,6 @@ jobs:
     outputs:
       normalized_action: ${{ steps.normalize.outputs.action }}
       normalized_versions: ${{ steps.normalize.outputs.versions }}
-      normalized_version_range: ${{ steps.normalize.outputs.version_range }}
       normalized_force_build: ${{ steps.normalize.outputs.force_build }}
       normalized_auto_promote: ${{ steps.normalize.outputs.auto_promote }}
       normalized_custom_latest: ${{ steps.normalize.outputs.custom_latest }}
@@ -209,8 +202,6 @@ jobs:
           CLIENT_ACTION="${{ github.event.client_payload.action || '' }}" \
           VERSIONS_INPUT="${{ github.event.inputs.versions || '' }}" \
           CLIENT_VERSIONS="${{ github.event.client_payload.versions || '' }}" \
-          VERSION_RANGE_INPUT="${{ github.event.inputs.version_range || '' }}" \
-          CLIENT_VERSION_RANGE="${{ github.event.client_payload.version_range || '' }}" \
           FORCE_INPUT="${{ github.event.inputs.force_build || '' }}" \
           CLIENT_FORCE="${{ github.event.client_payload.force_build || '' }}" \
           AUTO_PROMOTE_INPUT="${{ github.event.inputs.auto_promote || '' }}" \
@@ -227,7 +218,6 @@ jobs:
 
           REQUESTED_ACTION="${{ steps.normalize.outputs.action }}" \
           MANUAL_VERSIONS_RAW="${{ steps.normalize.outputs.versions }}" \
-          VERSION_RANGE="${{ steps.normalize.outputs.version_range }}" \
           NPM_PACKAGE="${NPM_PACKAGE}" \
           NPM_REGISTRY="${NPM_REGISTRY}" \
           MAX_VERSIONS="${MAX_VERSIONS}" \
@@ -237,7 +227,7 @@ jobs:
   build-versions:
     name: Build selected versions
     needs: [preflight, fetch-releases]
-    if: needs.fetch-releases.outputs.should_build == 'true' && needs.fetch-releases.outputs.normalized_action != 'promote-latest' && needs.fetch-releases.outputs.normalized_action != 'force-promote-latest' && needs.fetch-releases.outputs.normalized_action != 'promote-stable' && needs.fetch-releases.outputs.normalized_action != 'force-promote-stable'
+    if: needs.fetch-releases.outputs.should_build == 'true' && !startsWith(needs.fetch-releases.outputs.normalized_action, 'promote') && !startsWith(needs.fetch-releases.outputs.normalized_action, 'force-promote')
     uses: ./.github/workflows/reusable-build-versions.yml
     with:
       versions_json: ${{ needs.fetch-releases.outputs.versions_json }}
@@ -394,7 +384,7 @@ jobs:
 
           # Update workflow UI: version_range default and description with latest version
           WORKFLOW_FILE=".github/workflows/monitor-npm-releases.yml"
-          sed -i -E "s/(Version range to build \(e\.g\. )[0-9]+\.[0-9]+\.[0-9]+-[0-9]+\.[0-9]+\.[0-9]+/\11.0.0-${LATEST}/" "$WORKFLOW_FILE"
+          sed -i -E "s/(range \([0-9]+\.[0-9]+\.[0-9]+-[0-9]+\.[0-9]+\.[0-9]+/\11.0.0-${LATEST}/" "$WORKFLOW_FILE"
 
           if git diff --quiet README.md "$WORKFLOW_FILE"; then
             echo "README already up to date"

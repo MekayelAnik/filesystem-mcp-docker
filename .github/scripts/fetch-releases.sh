@@ -3,7 +3,6 @@ set -euo pipefail
 
 REQUESTED_ACTION="${REQUESTED_ACTION:-auto-check}"
 MANUAL_VERSIONS_RAW="${MANUAL_VERSIONS_RAW:-}"
-VERSION_RANGE="${VERSION_RANGE:-}"
 NPM_PACKAGE="${NPM_PACKAGE:-@modelcontextprotocol/server-filesystem}"
 NPM_REGISTRY="${NPM_REGISTRY:-https://registry.npmjs.org}"
 MAX_VERSIONS="${MAX_VERSIONS:-10}"
@@ -17,7 +16,13 @@ fi
 DATE_TAG="$(date +%d%m%Y)"
 echo "date_tag=$DATE_TAG" >> "$GITHUB_OUTPUT"
 
-if [[ -n "$MANUAL_VERSIONS_RAW" && "$REQUESTED_ACTION" == "build-versions" ]]; then
+# Auto-detect input format: range (X.Y.Z-A.B.C) vs comma-separated vs empty (auto from NPM)
+IS_RANGE=false
+if [[ -n "$MANUAL_VERSIONS_RAW" ]] && echo "$MANUAL_VERSIONS_RAW" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+-[0-9]+\.[0-9]+\.[0-9]+$'; then
+    IS_RANGE=true
+fi
+
+if [[ -n "$MANUAL_VERSIONS_RAW" && "$IS_RANGE" == "false" && ("$REQUESTED_ACTION" == "build" || "$REQUESTED_ACTION" == "build-versions") ]]; then
     VERSIONS_NEWEST="$({
         echo "$MANUAL_VERSIONS_RAW" \
             | tr ',' '\n' \
@@ -35,14 +40,8 @@ if [[ -n "$MANUAL_VERSIONS_RAW" && "$REQUESTED_ACTION" == "build-versions" ]]; t
     fi
 
     LATEST_VERSION="$(echo "$VERSIONS_NEWEST" | head -n1)"
-elif [[ "$REQUESTED_ACTION" == "build-range" ]]; then
-    if [[ -z "$VERSION_RANGE" ]]; then
-        echo "::error::build-range action requires a version_range input (e.g. 2025.11.25-2026.1.14)"
-        echo "versions_json=[]" >> "$GITHUB_OUTPUT"
-        echo "latest_version=" >> "$GITHUB_OUTPUT"
-        echo "should_build=false" >> "$GITHUB_OUTPUT"
-        exit 1
-    fi
+elif [[ "$IS_RANGE" == "true" || "$REQUESTED_ACTION" == "build-range" ]]; then
+    VERSION_RANGE="$MANUAL_VERSIONS_RAW"
     # Parse range: expected format "X.Y.Z-A.B.C" (start-end, inclusive)
     RANGE_START="$(echo "$VERSION_RANGE" | sed -E 's/^([0-9]+\.[0-9]+\.[0-9]+)-([0-9]+\.[0-9]+\.[0-9]+)$/\1/')"
     RANGE_END="$(echo "$VERSION_RANGE" | sed -E 's/^([0-9]+\.[0-9]+\.[0-9]+)-([0-9]+\.[0-9]+\.[0-9]+)$/\2/')"
