@@ -384,7 +384,7 @@ jobs:
 
           # Update workflow UI: version_range default and description with latest version
           WORKFLOW_FILE=".github/workflows/monitor-npm-releases.yml"
-          sed -i -E "s/(range \([0-9]+\.[0-9]+\.[0-9]+-[0-9]+\.[0-9]+\.[0-9]+/\11.0.0-${LATEST}/" "$WORKFLOW_FILE"
+          sed -i -E "s/(range \()[0-9]+\.[0-9]+\.[0-9]+-[0-9]+\.[0-9]+\.[0-9]+/\11.0.0-${LATEST}/" "$WORKFLOW_FILE"
 
           if git diff --quiet README.md "$WORKFLOW_FILE"; then
             echo "README already up to date"
