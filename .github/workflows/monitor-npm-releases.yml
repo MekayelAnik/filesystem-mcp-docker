@@ -371,30 +371,25 @@ jobs:
           ref: main
           token: ${{ github.token }}
 
-      - name: Update version in README and workflow UI
+      - name: Update version in README
         shell: bash
         run: |
           set -euo pipefail
           LATEST="${{ needs.fetch-releases.outputs.latest_version }}"
-          echo "Updating README and workflow UI to version $LATEST"
+          echo "Updating README to version $LATEST"
 
           # Update the Available Tags table row with specific version
           # Matches: | `X.Y.Z` | <anything> | Specific version
           sed -i -E "s/\| \`[0-9]+\.[0-9]+\.[0-9]+\` \|(.+)\| Specific version/| \`${LATEST}\` |\1| Specific version/" README.md
-
-          # Update workflow UI: version_range default and description with latest version
-          WORKFLOW_FILE=".github/workflows/monitor-npm-releases.yml"
-          sed -i -E "s/(range \()[0-9]+\.[0-9]+\.[0-9]+-[0-9]+\.[0-9]+\.[0-9]+/\11.0.0-${LATEST}/" "$WORKFLOW_FILE"
-
-          if git diff --quiet README.md "$WORKFLOW_FILE"; then
+          if git diff --quiet README.md; then
             echo "README already up to date"
             exit 0
           fi
 
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add README.md "$WORKFLOW_FILE"
-          git commit -m "docs: update version to ${LATEST} in README and workflow UI"
+          git add README.md
+          git commit -m "docs: update README version to ${LATEST}"
           git push
 
   update-dockerhub-description:
