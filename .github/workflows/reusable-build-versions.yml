@@ -308,7 +308,28 @@ jobs:
       matrix: ${{ fromJson(needs.prepare-matrix.outputs.versions) }}
 
     steps:
+      - name: Download all platform digests
+        id: download-digests
+        uses: actions/download-artifact@v8
+        continue-on-error: true
+        with:
+          path: /tmp/digests
+          pattern: digest-${{ matrix.version }}-*
+          merge-multiple: true
+
+      - name: Check if merge is needed
+        id: check-digests
+        shell: bash
+        run: |
+          if [[ ! -d /tmp/digests ]] || [[ -z "$(ls -A /tmp/digests/ 2>/dev/null)" ]]; then
+            echo "No digests found — build was skipped (tags already exist). Skipping merge."
+            echo "has_digests=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "has_digests=true" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Sanitize inputs
+        if: steps.check-digests.outputs.has_digests == 'true'
         id: sanitize
         shell: bash
         run: |
@@ -318,9 +339,11 @@ jobs:
           echo "dockerhub_repo=$(trim '${{ inputs.dockerhub_repo }}')" >> "$GITHUB_OUTPUT"
 
       - name: Checkout
+        if: steps.check-digests.outputs.has_digests == 'true'
         uses: actions/checkout@v6
 
       - name: Setup build environment
+        if: steps.check-digests.outputs.has_digests == 'true'
         uses: ./.github/actions/setup-build-env
         with:
           do_checkout: 'false'
@@ -333,14 +356,8 @@ jobs:
           ghcr_actor: ${{ github.actor }}
           ghcr_token: ${{ github.token }}
 
-      - name: Download all platform digests
-        uses: actions/download-artifact@v8
-        with:
-          path: /tmp/digests
-          pattern: digest-${{ matrix.version }}-*
-          merge-multiple: true
-
       - name: Create multi-arch manifest and push tags
+        if: steps.check-digests.outputs.has_digests == 'true'
         shell: bash
         run: |
           set -euo pipefail
@@ -351,18 +368,12 @@ jobs:
           IMAGE_TAG="${{ matrix.image_tag }}"
 
           echo "Merging platform digests for $VERSION"
-
-          # Early exit if no digests directory or empty (builds were skipped)
-          if [[ ! -d /tmp/digests ]] || [[ -z "$(ls -A /tmp/digests/ 2>/dev/null)" ]]; then
-            echo "No digests found — skipping manifest merge"
-            exit 0
-          fi
-
           ls -la /tmp/digests/
 
           # Collect all digest sources
           SOURCES=""
           for f in /tmp/digests/*; do
+            [[ -f "$f" ]] || continue
             DIGEST="$(cat "$f")"
             SLUG="$(basename "$f")"
             echo "  $SLUG: $DIGEST"
@@ -389,6 +400,7 @@ jobs:
           echo "Multi-arch manifest created successfully"
 
       - name: Verify Docker Hub parity (fallback sync)
+        if: steps.check-digests.outputs.has_digests == 'true'
         uses: ./.github/actions/registry-sync
         with:
           dockerhub_repo: ${{ steps.sanitize.outputs.dockerhub_repo }}
