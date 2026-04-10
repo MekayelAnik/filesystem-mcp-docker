@@ -129,6 +129,76 @@ validate_api_key() {
     export API_KEY
 }
 
+validate_rate_limit() {
+    RATE_LIMIT="${RATE_LIMIT:-0}"
+    RATE_LIMIT="$(trim "$RATE_LIMIT")"
+    RATE_LIMIT_PERIOD="${RATE_LIMIT_PERIOD:-10s}"
+    RATE_LIMIT_PERIOD="$(trim "$RATE_LIMIT_PERIOD")"
+    MAX_CONNECTIONS_PER_IP="${MAX_CONNECTIONS_PER_IP:-0}"
+    MAX_CONNECTIONS_PER_IP="$(trim "$MAX_CONNECTIONS_PER_IP")"
+
+    if [[ "$RATE_LIMIT" != "0" ]]; then
+        if ! [[ "$RATE_LIMIT" =~ ^[1-9][0-9]*$ ]]; then
+            echo "Invalid RATE_LIMIT='${RATE_LIMIT}'. Must be a positive integer or 0 to disable." >&2
+            exit 1
+        fi
+        if ! [[ "$RATE_LIMIT_PERIOD" =~ ^[1-9][0-9]*(s|m|h|d)$ ]]; then
+            echo "Invalid RATE_LIMIT_PERIOD='${RATE_LIMIT_PERIOD}'. Must be a duration like 10s, 1m, 1h." >&2
+            exit 1
+        fi
+    fi
+
+    if [[ "$MAX_CONNECTIONS_PER_IP" != "0" ]]; then
+        if ! [[ "$MAX_CONNECTIONS_PER_IP" =~ ^[1-9][0-9]*$ ]]; then
+            echo "Invalid MAX_CONNECTIONS_PER_IP='${MAX_CONNECTIONS_PER_IP}'. Must be a positive integer or 0 to disable." >&2
+            exit 1
+        fi
+    fi
+
+    export RATE_LIMIT RATE_LIMIT_PERIOD MAX_CONNECTIONS_PER_IP
+}
+
+validate_ip_access() {
+    IP_ALLOWLIST="${IP_ALLOWLIST:-}"
+    IP_BLOCKLIST="${IP_BLOCKLIST:-}"
+    IP_ALLOWLIST="$(trim "$IP_ALLOWLIST")"
+    IP_BLOCKLIST="$(trim "$IP_BLOCKLIST")"
+
+    local ip_cidr_regex='^[0-9a-fA-F.:]+(/[0-9]+)?$'
+
+    if [[ -n "$IP_BLOCKLIST" ]]; then
+        : > /tmp/haproxy_blocklist.txt
+        IFS=',' read -ra BLOCK_IPS <<< "$IP_BLOCKLIST"
+        for ip in "${BLOCK_IPS[@]}"; do
+            ip="$(trim "$ip")"
+            [[ -z "$ip" ]] && continue
+            if [[ "$ip" =~ $ip_cidr_regex ]]; then
+                echo "$ip" >> /tmp/haproxy_blocklist.txt
+            else
+                echo "Warning: Invalid IP_BLOCKLIST entry '${ip}' — skipping" >&2
+            fi
+        done
+        echo "IP blocklist loaded: $(wc -l < /tmp/haproxy_blocklist.txt) entries"
+    fi
+
+    if [[ -n "$IP_ALLOWLIST" ]]; then
+        : > /tmp/haproxy_allowlist.txt
+        IFS=',' read -ra ALLOW_IPS <<< "$IP_ALLOWLIST"
+        for ip in "${ALLOW_IPS[@]}"; do
+            ip="$(trim "$ip")"
+            [[ -z "$ip" ]] && continue
+            if [[ "$ip" =~ $ip_cidr_regex ]]; then
+                echo "$ip" >> /tmp/haproxy_allowlist.txt
+            else
+                echo "Warning: Invalid IP_ALLOWLIST entry '${ip}' — skipping" >&2
+            fi
+        done
+        echo "IP allowlist loaded: $(wc -l < /tmp/haproxy_allowlist.txt) entries"
+    fi
+
+    export IP_ALLOWLIST IP_BLOCKLIST
+}
+
 validate_cors() {
     ALLOW_ALL_CORS=false
     HAPROXY_CORS_ENABLED=false
@@ -370,6 +440,62 @@ generate_haproxy_config() {
         exit 1
     fi
 
+    # Rate limiting and connection limiting
+    local rate_limit_table
+    local rate_limit_check
+    if [[ "$RATE_LIMIT" != "0" || "$MAX_CONNECTIONS_PER_IP" != "0" ]]; then
+        local store_counters=""
+        [[ "$RATE_LIMIT" != "0" ]] && store_counters="http_req_rate(${RATE_LIMIT_PERIOD})"
+        [[ "$MAX_CONNECTIONS_PER_IP" != "0" ]] && {
+            [[ -n "$store_counters" ]] && store_counters+=","
+            store_counters+="conn_cur"
+        }
+
+        rate_limit_table="backend rate_limit_table
+    stick-table type ipv6 size 100k expire 30s store ${store_counters}"
+
+        rate_limit_check="    # Track client IP for rate/connection limiting
+    http-request track-sc0 src table rate_limit_table"
+
+        if [[ "$RATE_LIMIT" != "0" ]]; then
+            rate_limit_check+="
+    http-request return status 429 content-type \"application/json\" string '{\"error\":\"Too Many Requests\",\"message\":\"Rate limit exceeded\"}' hdr \"Retry-After\" \"${RATE_LIMIT_PERIOD%%[smhd]*}\" if !is_health_check { sc_http_req_rate(0,rate_limit_table) gt ${RATE_LIMIT} }"
+            echo "Rate limiting enabled: ${RATE_LIMIT} requests per ${RATE_LIMIT_PERIOD}"
+        fi
+
+        if [[ "$MAX_CONNECTIONS_PER_IP" != "0" ]]; then
+            rate_limit_check+="
+    http-request deny deny_status 429 content-type \"application/json\" string '{\"error\":\"Too Many Connections\",\"message\":\"Connection limit exceeded\"}' if !is_health_check { sc_conn_cur(0,rate_limit_table) gt ${MAX_CONNECTIONS_PER_IP} }"
+            echo "Connection limiting enabled: ${MAX_CONNECTIONS_PER_IP} concurrent connections per IP"
+        fi
+    else
+        rate_limit_table="# Rate limiting disabled"
+        rate_limit_check="    # Rate limiting disabled"
+    fi
+
+    # IP access control
+    local ip_access_check
+    if [[ -n "$IP_BLOCKLIST" && -s /tmp/haproxy_blocklist.txt ]]; then
+        ip_access_check="    # IP blocklist
+    acl is_blocked_ip src -f /tmp/haproxy_blocklist.txt
+    http-request deny deny_status 403 content-type \"application/json\" string '{\"error\":\"Forbidden\",\"message\":\"IP address blocked\"}' if is_blocked_ip !is_health_check"
+    else
+        ip_access_check=""
+    fi
+
+    if [[ -n "$IP_ALLOWLIST" && -s /tmp/haproxy_allowlist.txt ]]; then
+        [[ -n "$ip_access_check" ]] && ip_access_check+="
+"
+        ip_access_check+="    # IP allowlist (only listed IPs may connect)
+    acl is_allowed_ip src -f /tmp/haproxy_allowlist.txt
+    acl is_allowed_ip src 127.0.0.1 ::1
+    http-request deny deny_status 403 content-type \"application/json\" string '{\"error\":\"Forbidden\",\"message\":\"IP address not allowed\"}' if !is_allowed_ip"
+    fi
+
+    if [[ -z "$ip_access_check" ]]; then
+        ip_access_check="    # IP access control disabled"
+    fi
+
     local api_key_check
     if [[ -n "$API_KEY" ]]; then
         local escaped_key_sed
@@ -437,15 +563,14 @@ generate_haproxy_config() {
         -e "s|__CORS_RESPONSE_CONDITION__|${cors_response_condition}|g" \
         "$HAPROXY_TEMPLATE" > "${HAPROXY_CONFIG}.tmp"
 
-    awk -v replacement="$api_key_check" -v replacement_cors="$cors_check" '
-        /__API_KEY_CHECK__/ {
-            print replacement
-            next
-        }
-        /__CORS_CHECK__/ {
-            print replacement_cors
-            next
-        }
+    awk -v replacement="$api_key_check" -v replacement_cors="$cors_check" \
+        -v replacement_rate_table="$rate_limit_table" -v replacement_rate_check="$rate_limit_check" \
+        -v replacement_ip_access="$ip_access_check" '
+        /__API_KEY_CHECK__/ { print replacement; next }
+        /__CORS_CHECK__/ { print replacement_cors; next }
+        /__RATE_LIMIT_TABLE__/ { print replacement_rate_table; next }
+        /__RATE_LIMIT_CHECK__/ { print replacement_rate_check; next }
+        /__IP_ACCESS_CHECK__/ { print replacement_ip_access; next }
         { print }
     ' "${HAPROXY_CONFIG}.tmp" > "$HAPROXY_CONFIG"
 
@@ -552,6 +677,8 @@ main() {
     HTTP_VERSION_MODE="$(normalize_http_version_mode "$HTTP_VERSION_MODE")"
 
     validate_api_key
+    validate_rate_limit
+    validate_ip_access
     validate_cors
 
     if [[ ! -f "$FIRST_RUN_FILE" ]]; then
