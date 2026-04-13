@@ -39,7 +39,7 @@ if [[ -n "$MANUAL_VERSIONS_RAW" && "$IS_RANGE" == "false" && ("$REQUESTED_ACTION
         exit 0
     fi
 
-    LATEST_VERSION="$(echo "$VERSIONS_NEWEST" | head -n1)"
+    LATEST_VERSION="$(echo "$VERSIONS_NEWEST" | sort -Vr | head -n1)"
 elif [[ "$IS_RANGE" == "true" || "$REQUESTED_ACTION" == "build-range" ]]; then
     VERSION_RANGE="$MANUAL_VERSIONS_RAW"
     # Parse range: expected format "X.Y.Z-A.B.C" (start-end, inclusive)
@@ -158,7 +158,7 @@ else
     if [[ -n "$DIST_TAG_LATEST" ]] && echo "$VERSIONS_NEWEST" | grep -qx "$DIST_TAG_LATEST"; then
         LATEST_VERSION="$DIST_TAG_LATEST"
     else
-        LATEST_VERSION="$(echo "$VERSIONS_NEWEST" | head -n1)"
+        LATEST_VERSION="$(echo "$VERSIONS_NEWEST" | sort -Vr | head -n1)"
     fi
 fi
 
