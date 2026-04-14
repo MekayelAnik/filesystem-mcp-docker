@@ -78,6 +78,14 @@
       "enabled": false
     },
     {
+      "description": "setup-crane: allow minor updates (no major tag available)",
+      "matchManagers": ["github-actions"],
+      "matchPackageNames": ["imjasonh/setup-crane"],
+      "matchUpdateTypes": ["minor"],
+      "enabled": true,
+      "automerge": true
+    },
+    {
       "description": "GitHub Actions: major updates as PRs",
       "matchManagers": [
         "github-actions"
