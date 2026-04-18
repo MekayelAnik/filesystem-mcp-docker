@@ -199,6 +199,40 @@ validate_ip_access() {
     export IP_ALLOWLIST IP_BLOCKLIST
 }
 
+validate_fs_allowed_dirs() {
+    FS_ALLOWED_DIRS="${FS_ALLOWED_DIRS:-}"
+    FS_ALLOWED_DIRS="$(trim "$FS_ALLOWED_DIRS")"
+    FS_ALLOWED_DIRS_ARGS=()
+
+    if [[ -z "$FS_ALLOWED_DIRS" ]]; then
+        echo "Error: FS_ALLOWED_DIRS is required. Provide one or more host paths (comma or space separated) that are mounted into the container." >&2
+        echo "Example: -e FS_ALLOWED_DIRS=\"/data,/projects\" (also mount those paths with -v)" >&2
+        exit 1
+    fi
+
+    local normalized="${FS_ALLOWED_DIRS//,/ }"
+    local dir
+    for dir in $normalized; do
+        dir="$(trim "$dir")"
+        [[ -z "$dir" ]] && continue
+        if [[ "$dir" != /* ]]; then
+            echo "Invalid FS_ALLOWED_DIRS entry '${dir}': must be an absolute path." >&2
+            exit 1
+        fi
+        if [[ ! -d "$dir" ]]; then
+            echo "Warning: FS_ALLOWED_DIRS entry '${dir}' does not exist inside the container. Did you forget to mount it?" >&2
+        fi
+        FS_ALLOWED_DIRS_ARGS+=("$dir")
+    done
+
+    if [[ ${#FS_ALLOWED_DIRS_ARGS[@]} -eq 0 ]]; then
+        echo "Error: FS_ALLOWED_DIRS is set but contains no valid paths." >&2
+        exit 1
+    fi
+
+    echo "Filesystem allowed directories: ${FS_ALLOWED_DIRS_ARGS[*]}"
+}
+
 validate_cors() {
     ALLOW_ALL_CORS=false
     HAPROXY_CORS_ENABLED=false
@@ -585,8 +619,17 @@ start_haproxy() {
     HAPROXY_PID=$!
 }
 
+shell_quote() {
+    local value="$1"
+    printf "'%s'" "${value//\'/\'\\\'\'}"
+}
+
 start_mcp_server() {
     local mcp_server_cmd="npx -y @modelcontextprotocol/server-filesystem"
+    local dir
+    for dir in "${FS_ALLOWED_DIRS_ARGS[@]}"; do
+        mcp_server_cmd+=" $(shell_quote "$dir")"
+    done
 
     case "${PROTOCOL^^}" in
         SHTTP|STREAMABLEHTTP)
@@ -680,6 +723,7 @@ main() {
     validate_rate_limit
     validate_ip_access
     validate_cors
+    validate_fs_allowed_dirs
 
     if [[ ! -f "$FIRST_RUN_FILE" ]]; then
         handle_first_run
