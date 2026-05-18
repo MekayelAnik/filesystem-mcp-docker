@@ -19,12 +19,17 @@ __RATE_LIMIT_TABLE__
 
 # Frontend - receives all incoming requests
 frontend mcp_frontend
-    bind *:__SERVER_PORT__ __BIND_PARAMS__
+    bind *:__SERVER_PORT__ __BIND_PARAMS__ __FRONTEND_MAXCONN__
     __QUIC_BIND_LINE__
 
     # Define ACL for health check endpoint from localhost
     acl is_health_check path /healthz
     acl is_localhost src 127.0.0.1 ::1
+
+    # Local health-check shortcut: HAProxy answers /healthz directly so the
+    # Docker healthcheck does not need to round-trip through mcp-proxy (which
+    # has no configurable health endpoint).
+    http-request return status 200 content-type "text/plain" string "ok\n" if is_health_check
 
     # Define ACL that's always false (for CORS disabled scenario)
     acl always_false always_false
@@ -61,7 +66,10 @@ frontend mcp_frontend
     # Route to backend
     default_backend mcp_backend
 
-# Backend - forwards to the actual MCP server
+# Backend - mcp-proxy (stdio<->StreamableHTTP/SSE bridge)
+# balance hdr(Mcp-Session-Id) pins requests for the same MCP session to the
+# same backend (no-op with one backend, future-proof for multi-replica setups).
 backend mcp_backend
-    balance roundrobin
-    server __SERVER_NAME__ 127.0.0.1:__INTERNAL_PORT__ check
+    balance hdr(Mcp-Session-Id)
+    hash-type consistent
+    server __SERVER_NAME__ 127.0.0.1:__INTERNAL_PORT__ check __SERVER_MAXCONN__

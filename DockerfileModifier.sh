@@ -6,7 +6,11 @@ BASE_IMAGE=$(cat ./build_data/base-image 2>/dev/null || echo "node:current-alpin
 HAPROXY_IMAGE=$(cat ./build_data/haproxy-image 2>/dev/null || echo "haproxy:lts-alpine")
 FILESYSTEM_VERSION=$(cat ./build_data/version 2>/dev/null || exit 1)
 FILESYSTEM_MCP_PKG="@modelcontextprotocol/server-filesystem@${FILESYSTEM_VERSION}"
-SUPERGATEWAY_PKG='supergateway@latest'
+# mcp-proxy: stdio<->StreamableHTTP/SSE bridge. Replaces supergateway.
+# Stateful by default (one stdio child shared across all sessions) - avoids
+# the spawn-per-request memory leak that affected supergateway in stateless
+# mode (supercorp-ai/supergateway#108).
+MCP_PROXY_PKG=$(cat ./build_data/mcp_proxy_version 2>/dev/null || echo "mcp-proxy")
 DOCKERFILE_NAME="Dockerfile.$REPO_NAME"
 
 # Create a temporary file safely
@@ -38,7 +42,7 @@ LABEL org.opencontainers.image.source="https://github.com/mekayelanik/filesystem
 
 # Copy the entrypoint script into the container and make it executable
 COPY ./resources/ /usr/local/bin/
-RUN chmod +x /usr/local/bin/entrypoint.sh /usr/local/bin/banner.sh \\
+RUN chmod +x /usr/local/bin/entrypoint.sh /usr/local/bin/banner.sh /usr/local/bin/healthcheck.sh \\
     && if [ -f /usr/local/bin/build-timestamp.txt ]; then chmod +r /usr/local/bin/build-timestamp.txt; fi \\
     && mkdir -p /etc/haproxy \\
     && mv -vf /usr/local/bin/haproxy.cfg.template /etc/haproxy/haproxy.cfg.template \\
@@ -47,7 +51,7 @@ RUN chmod +x /usr/local/bin/entrypoint.sh /usr/local/bin/banner.sh \\
 # Install required APK packages
 RUN echo "https://dl-cdn.alpinelinux.org/alpine/edge/main" > /etc/apk/repositories && \\
     echo "https://dl-cdn.alpinelinux.org/alpine/edge/community" >> /etc/apk/repositories && \\
-    apk --update-cache --no-cache add bash shadow su-exec tzdata haproxy netcat-openbsd openssl && \\
+    apk --update-cache --no-cache add bash shadow su-exec tzdata haproxy netcat-openbsd openssl ca-certificates curl python3 py3-pip && \\
     rm -rf /var/cache/apk/*
 
 # HAProxy with native QUIC/H3 support from official image
@@ -68,12 +72,21 @@ RUN --mount=type=cache,target=/root/.npm \\
         exit 1; \\
     fi
 
-# Install Supergateway
-RUN --mount=type=cache,target=/root/.npm \\
-    echo "Installing Supergateway..." && \\
-    npm install -g ${SUPERGATEWAY_PKG} --omit=dev --no-audit --no-fund --loglevel error && \\
+# Install mcp-proxy (replaces supergateway). Pure-Python via pip.
+RUN --mount=type=cache,target=/root/.cache/pip \\
+    echo "Installing ${MCP_PROXY_PKG}..." && \\
+    pip install --no-cache-dir --break-system-packages ${MCP_PROXY_PKG} && \\
+    mcp-proxy --version || true && \\
     rm -rf /tmp/* /var/tmp/* && \\
     rm -rf /usr/local/lib/node_modules/npm/man /usr/local/lib/node_modules/npm/docs /usr/local/lib/node_modules/npm/html
+
+LABEL org.opencontainers.image.description="Filesystem MCP (mcp-proxy stdio<->HTTP bridge)"
+
+# mcp-proxy and HAProxy concurrency defaults (overridable at runtime).
+ENV MCP_PROXY_STATELESS=false
+ENV FILESYSTEM_MAX_MEM_MB=4096
+ENV HAPROXY_FRONTEND_MAXCONN=64
+ENV HAPROXY_SERVER_MAXCONN=16
 
 # Use an ARG for the default port
 ARG PORT=8010
@@ -86,8 +99,8 @@ ENV PORT=\${PORT}
 ENV API_KEY=\${API_KEY}
 
 # L7 health check: auto-detects HTTP/HTTPS via ENABLE_HTTPS env var
-HEALTHCHECK --interval=30s --timeout=10s --start-period=10s --retries=3 \\
-    CMD sh -c 'wget -q --spider --no-check-certificate \$([ "\$ENABLE_HTTPS" = "true" ] && echo https || echo http)://127.0.0.1:\${PORT:-8015}/healthz'
+HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \\
+    CMD ["/usr/local/bin/healthcheck.sh"]
 
 # Set the entrypoint
 ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]

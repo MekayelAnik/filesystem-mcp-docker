@@ -588,6 +588,21 @@ generate_haproxy_config() {
     escaped_bind_params="$(escape_sed_replacement "$BIND_PARAMS")"
     escaped_quic_bind_line="$(escape_sed_replacement "$QUIC_BIND_LINE")"
 
+    # Concurrency caps. Bound HAProxy-level acceptance so a burst cannot
+    # trigger unbounded upstream mcp-proxy child reuse / spawn. Empty = no cap.
+    local frontend_maxconn_clause=""
+    local server_maxconn_clause=""
+    if [[ "${HAPROXY_FRONTEND_MAXCONN:-0}" =~ ^[1-9][0-9]*$ ]]; then
+        frontend_maxconn_clause="maxconn ${HAPROXY_FRONTEND_MAXCONN}"
+    fi
+    if [[ "${HAPROXY_SERVER_MAXCONN:-0}" =~ ^[1-9][0-9]*$ ]]; then
+        server_maxconn_clause="maxconn ${HAPROXY_SERVER_MAXCONN}"
+    fi
+    local escaped_frontend_maxconn
+    local escaped_server_maxconn
+    escaped_frontend_maxconn="$(escape_sed_replacement "$frontend_maxconn_clause")"
+    escaped_server_maxconn="$(escape_sed_replacement "$server_maxconn_clause")"
+
     sed -e "s|__SERVER_PORT__|${PORT}|g" \
         -e "s|__BIND_PARAMS__|${escaped_bind_params}|g" \
         -e "s|__QUIC_BIND_LINE__|${escaped_quic_bind_line}|g" \
@@ -595,6 +610,8 @@ generate_haproxy_config() {
         -e "s|__SERVER_NAME__|${HAPROXY_SERVER_NAME}|g" \
         -e "s|__CORS_PREFLIGHT_CONDITION__|${cors_preflight_condition}|g" \
         -e "s|__CORS_RESPONSE_CONDITION__|${cors_response_condition}|g" \
+        -e "s|__FRONTEND_MAXCONN__|${escaped_frontend_maxconn}|g" \
+        -e "s|__SERVER_MAXCONN__|${escaped_server_maxconn}|g" \
         "$HAPROXY_TEMPLATE" > "${HAPROXY_CONFIG}.tmp"
 
     awk -v replacement="$api_key_check" -v replacement_cors="$cors_check" \
@@ -631,27 +648,66 @@ start_mcp_server() {
         mcp_server_cmd+=" $(shell_quote "$dir")"
     done
 
+    # Build mcp-proxy CORS args. CORS env may be comma-separated origins or "*".
+    local cors_args=()
+    if [[ -n "${CORS:-}" ]]; then
+        local origin
+        for origin in ${CORS//,/ }; do
+            cors_args+=(--allow-origin "$origin")
+        done
+    fi
+
+    local stateless_args=()
+    if [[ "${MCP_PROXY_STATELESS,,}" == "true" ]]; then
+        stateless_args+=(--stateless)
+    else
+        stateless_args+=(--no-stateless)
+    fi
+
+    local mode_tag="stateful"
+    [[ "${MCP_PROXY_STATELESS,,}" == "true" ]] && mode_tag="stateless"
+
+    # mcp-proxy expects an argv array; split the prebuilt stdio command
+    # preserving any quoted segments (callers may inject env wrappers).
+    local -a backend_argv
+    # shellcheck disable=SC2086
+    eval "backend_argv=(${mcp_server_cmd:-${MCP_SERVER_CMD:-${snyk_mcp_cmd:-}}})"
+
     case "${PROTOCOL^^}" in
-        SHTTP|STREAMABLEHTTP)
-            CMD_ARGS=(npx --yes supergateway --port "$INTERNAL_PORT" --streamableHttpPath /mcp --outputTransport streamableHttp --healthEndpoint /healthz --stdio "$mcp_server_cmd")
-            PROTOCOL_DISPLAY="SHTTP/streamableHttp"
-            ;;
-        SSE)
-            CMD_ARGS=(npx --yes supergateway --port "$INTERNAL_PORT" --ssePath /sse --outputTransport sse --healthEndpoint /healthz --stdio "$mcp_server_cmd")
-            PROTOCOL_DISPLAY="SSE/Server-Sent Events"
+        SHTTP|STREAMABLEHTTP|SSE)
+            # mcp-proxy exposes /mcp (StreamableHTTP) and /sse simultaneously.
+            CMD_ARGS=(mcp-proxy
+                --host 127.0.0.1
+                --port "$INTERNAL_PORT"
+                --pass-environment
+                --expose-header Mcp-Session-Id
+                "${stateless_args[@]}"
+                "${cors_args[@]}"
+                --
+                "${backend_argv[@]}")
+            PROTOCOL_DISPLAY="mcp-proxy: /mcp (StreamableHTTP) + /sse (${mode_tag})"
             ;;
         WS|WEBSOCKET)
-            CMD_ARGS=(npx --yes supergateway --port "$INTERNAL_PORT" --messagePath /message --outputTransport ws --healthEndpoint /healthz --stdio "$mcp_server_cmd")
-            PROTOCOL_DISPLAY="WS/WebSocket"
+            echo "ERROR: WebSocket transport is not supported by mcp-proxy." >&2
+            echo "       Use PROTOCOL=SHTTP or PROTOCOL=SSE instead." >&2
+            return 1
             ;;
         *)
-            echo "Invalid PROTOCOL='${PROTOCOL}', using default ${DEFAULT_PROTOCOL}"
-            CMD_ARGS=(npx --yes supergateway --port "$INTERNAL_PORT" --streamableHttpPath /mcp --outputTransport streamableHttp --healthEndpoint /healthz --stdio "$mcp_server_cmd")
-            PROTOCOL_DISPLAY="SHTTP/streamableHttp"
+            echo "Invalid PROTOCOL='${PROTOCOL}', defaulting to ${DEFAULT_PROTOCOL}"
+            CMD_ARGS=(mcp-proxy
+                --host 127.0.0.1
+                --port "$INTERNAL_PORT"
+                --pass-environment
+                --expose-header Mcp-Session-Id
+                "${stateless_args[@]}"
+                "${cors_args[@]}"
+                --
+                "${backend_argv[@]}")
+            PROTOCOL_DISPLAY="mcp-proxy: /mcp (StreamableHTTP) + /sse (${mode_tag})"
             ;;
     esac
 
-    echo "Launching Filesystem MCP with protocol: ${PROTOCOL_DISPLAY}"
+    echo "Launching Filesystem MCP via ${PROTOCOL_DISPLAY}"
 
     if [ "$(id -u)" -eq 0 ]; then
         su-exec node "${CMD_ARGS[@]}" &

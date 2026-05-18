@@ -1,0 +1,32 @@
+services:
+  filesystem-mcp:
+    image: mekayelanik/filesystem-mcp:latest
+    container_name: filesystem-mcp
+    environment:
+      - PORT=8015
+      - INTERNAL_PORT=38011
+      - PUID=1000
+      - PGID=1000
+      - TZ=UTC
+      - NODE_ENV=production
+      - PROTOCOL=SHTTP
+      - ENABLE_HTTPS=false
+      - HTTP_VERSION_MODE=auto
+      # mcp-proxy session model. Stateful by default - one stdio child shared
+      # across all sessions, multiplexed by JSON-RPC ids. Sessions persist
+      # until the client explicitly closes them (no server-side TTL). Set to
+      # "true" only if full per-request isolation is required (memory-hostile).
+      - MCP_PROXY_STATELESS=false
+      # Cap virtual memory of the backend stdio child via prlimit --as
+      # (MiB; 0 disables). Reserved for future use.
+      - FILESYSTEM_MAX_MEM_MB=4096
+      # HAProxy concurrency caps (0 disables)
+      - HAPROXY_FRONTEND_MAXCONN=64
+      - HAPROXY_SERVER_MAXCONN=16
+      # Optional: require Bearer token auth at HAProxy layer
+      # - API_KEY=replace-with-strong-secret
+      # Optional: CORS origins (comma-separated, or * for all)
+      # - CORS=*
+    ports:
+      - "8015:8015"
+    restart: unless-stopped

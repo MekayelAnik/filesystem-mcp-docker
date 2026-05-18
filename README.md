@@ -49,7 +49,7 @@ Filesystem MCP Server provides secure filesystem access capabilities through the
 ### Key Features
 
 ✨ **Multi-Architecture Support** - Native support for x86-64 and ARM64  
-🚀 **Multiple Transport Protocols** - HTTP, SSE, and WebSocket support  
+🚀 **Multiple Transport Protocols** - StreamableHTTP and SSE via mcp-proxy  
 🔒 **Secure by Design** - Alpine-based with minimal attack surface  
 ⚡ **High Performance** - ZSTD compression for faster deployments  
 🎯 **Production Ready** - Stable releases with comprehensive testing  
@@ -146,7 +146,6 @@ docker run -d \
 |:---------|:---------|:---------|
 | **HTTP** | `http://host-ip:8015/mcp` | Best compatibility (recommended) |
 | **SSE** | `http://host-ip:8015/sse` | Real-time streaming |
-| **WebSocket** | `ws://host-ip:8015/message` | Bidirectional communication |
 
 When HTTPS is enabled (`ENABLE_HTTPS=true`), use TLS endpoints:
 
@@ -154,7 +153,6 @@ When HTTPS is enabled (`ENABLE_HTTPS=true`), use TLS endpoints:
 |:---------|:---------|
 | **SHTTP** | `https://host-ip:8015/mcp` |
 | **SSE** | `https://host-ip:8015/sse` |
-| **WebSocket** | `wss://host-ip:8015/message` |
 
 > ⚠️ **Security Warning:** The container now defaults to HTTP (`ENABLE_HTTPS=false`) for easier local setup. Use `ENABLE_HTTPS=true` for production, public networks, or any untrusted environment.
 >
@@ -169,7 +167,7 @@ When HTTPS is enabled (`ENABLE_HTTPS=true`), use TLS endpoints:
 | Variable | Default | Description |
 |:---------|:-------:|:------------|
 | `PORT` | `8015` | Internal server port |
-| `INTERNAL_PORT` | `38011` | Internal MCP server port used by supergateway |
+| `INTERNAL_PORT` | `38011` | Internal MCP server port used by mcp-proxy |
 | `PUID` | `1000` | User ID for file permissions |
 | `PGID` | `1000` | Group ID for file permissions |
 | `TZ` | `Asia/Dhaka` | Container timezone ([TZ database](https://en.wikipedia.org/wiki/List_of_tz_database_time_zones)) |
@@ -233,20 +231,31 @@ id username
 
 ---
 
+---
+
+### Memory & Concurrency Tuning
+
+This image embeds **mcp-proxy** (sparfenyuk/mcp-proxy) as the stdio↔HTTP bridge. Key knobs:
+
+- `MCP_PROXY_STATELESS=false` (default): one stdio backend child is shared across **all** MCP sessions, JSON-RPC-id-multiplexed. Minimal memory, no per-request fork cost.
+- `MCP_PROXY_STATELESS=true`: per-request transport instance. Use only when full session isolation is required — memory grows with concurrency.
+- `HAPROXY_FRONTEND_MAXCONN` / `HAPROXY_SERVER_MAXCONN`: HAProxy-level caps. Bound bursts so the backend cannot be flooded. Defaults of 64/16 are sensible for a single replica.
+
+> Root cause for the migration: supergateway 3.4.3 stateless mode (its default) spawned a child stdio process per POST and never reaped it (supercorp-ai/supergateway#108). mcp-proxy stateful default shares one stdio backend across sessions and reduced RSS by ~4.6× in our fleet testing.
+
 ## MCP Client Configuration
 
 ### Transport Support
 
-| Client | HTTP | SSE | WebSocket | Recommended |
-|:-------|:----:|:---:|:---------:|:------------|
-| **VS Code (Cline/Roo-Cline)** | ✅ | ✅ | ❌ | HTTP |
-| **Claude Desktop** | ✅ | ✅ | ⚠️* | HTTP |
-| **Claude CLI** | ✅ | ✅ | ⚠️* | HTTP |
-| **Codex CLI** | ✅ | ✅ | ⚠️* | HTTP |
-| **Codeium (Windsurf)** | ✅ | ✅ | ⚠️* | HTTP |
-| **Cursor** | ✅ | ✅ | ⚠️* | HTTP |
+| Client | HTTP | SSE | Recommended |
+|:-------|:----:|:---:|:------------|
+| **VS Code (Cline/Roo-Cline)** | ✅ | ✅ | | HTTP |
+| **Claude Desktop** | ✅ | ✅ | | HTTP |
+| **Claude CLI** | ✅ | ✅ | | HTTP |
+| **Codex CLI** | ✅ | ✅ | | HTTP |
+| **Codeium (Windsurf)** | ✅ | ✅ | | HTTP |
+| **Cursor** | ✅ | ✅ | | HTTP |
 
-> ⚠️ *WebSocket is experimental ([Issue #1288](https://github.com/modelcontextprotocol/modelcontextprotocol/issues/1288))
 
 ---
 
