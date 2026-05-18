@@ -30,17 +30,36 @@ inputs:
 runs:
   using: composite
   steps:
-    - name: Login to Docker Hub
-      if: inputs.push_to_dockerhub != 'false'
-      uses: docker/login-action@v4
+    - name: Login to Docker Hub (with retry)
+      if: inputs.push_to_dockerhub != 'false' && inputs.dockerhub_username != ''
+      uses: nick-fields/retry@v4
+      env:
+        REG_USER: ${{ inputs.dockerhub_username }}
+        REG_TOKEN: ${{ inputs.dockerhub_token }}
       with:
-        username: ${{ inputs.dockerhub_username }}
-        password: ${{ inputs.dockerhub_token }}
+        timeout_seconds: 30
+        max_attempts: 5
+        retry_wait_seconds: 2
+        warning_on_retry: true
+        shell: bash
+        command: |
+          set -euo pipefail
+          printf '%s' "$REG_TOKEN" | docker login docker.io \
+            --username "$REG_USER" --password-stdin
 
-    - name: Login to GitHub Container Registry
-      if: inputs.push_to_ghcr != 'false'
-      uses: docker/login-action@v4
+    - name: Login to GitHub Container Registry (with retry)
+      if: inputs.push_to_ghcr != 'false' && inputs.ghcr_actor != ''
+      uses: nick-fields/retry@v4
+      env:
+        REG_USER: ${{ inputs.ghcr_actor }}
+        REG_TOKEN: ${{ inputs.ghcr_token }}
       with:
-        registry: ghcr.io
-        username: ${{ inputs.ghcr_actor }}
-        password: ${{ inputs.ghcr_token }}
+        timeout_seconds: 30
+        max_attempts: 5
+        retry_wait_seconds: 2
+        warning_on_retry: true
+        shell: bash
+        command: |
+          set -euo pipefail
+          printf '%s' "$REG_TOKEN" | docker login ghcr.io \
+            --username "$REG_USER" --password-stdin
