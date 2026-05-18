@@ -260,9 +260,7 @@ jobs:
         needs.fetch-releases.outputs.normalized_action == 'force-promote-latest' ||
         needs.fetch-releases.outputs.normalized_action == 'promote-stable' ||
         needs.fetch-releases.outputs.normalized_action == 'force-promote-stable' ||
-        (needs.build-versions.result == 'success' && needs.fetch-releases.outputs.normalized_auto_promote == 'true') ||
-        (needs.build-versions.result == 'success' && contains(needs.fetch-releases.outputs.versions_json, needs.fetch-releases.outputs.latest_version)) ||
-        needs.fetch-releases.outputs.normalized_action == 'auto-check'
+        (needs.build-versions.result == 'success' && needs.build-versions.outputs.has_builds == 'true')
       )
     uses: ./.github/workflows/reusable-promote-latest.yml
     with:
@@ -279,12 +277,15 @@ jobs:
 
   update-state:
     name: Update pipeline state
+    # Runs immediately after promote-latest. Fires only when a NEW latest
+    # version was actually built + promoted in this run (has_builds=true).
     needs: [fetch-releases, build-versions, promote-latest]
     if: |
-      always() &&
       needs.fetch-releases.outputs.latest_version != '' &&
+      needs.build-versions.result == 'success' &&
+      needs.build-versions.outputs.has_builds == 'true' &&
       needs.promote-latest.result == 'success' &&
-      (needs.build-versions.result == 'success' || needs.build-versions.result == 'skipped')
+      contains(needs.fetch-releases.outputs.versions_json, needs.fetch-releases.outputs.latest_version)
     runs-on: ${{ vars.ACTION_RUNNER_VERSION || 'ubuntu-latest' }}
     steps:
       - name: Checkout state branch
@@ -322,15 +323,19 @@ jobs:
 
           NOW="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 
-          # Read existing state to preserve or reset latest_version_since
           EXISTING_VERSION=""
           EXISTING_SINCE=""
           if [[ -f state.json ]]; then
-            EXISTING_VERSION="$(jq -r '.npm_latest_version // ""' state.json)"
+            EXISTING_VERSION="$(jq -r '.npm_latest_version // .npm_latest_version // .pypi_latest_version // ""' state.json)"
             EXISTING_SINCE="$(jq -r '.latest_version_since // ""' state.json)"
           fi
 
-          # Determine latest_version_since
+          # Early-exit: version unchanged and state already initialized.
+          if [[ -n "$EXISTING_VERSION" && "$LATEST" == "$EXISTING_VERSION" && -n "$EXISTING_SINCE" ]]; then
+            echo "Version unchanged ($LATEST) and state already initialized — skipping commit"
+            exit 0
+          fi
+
           if [[ "$LATEST" != "$EXISTING_VERSION" || -z "$EXISTING_SINCE" ]]; then
             SINCE="$NOW"
             echo "Version changed or first run — setting latest_version_since to $SINCE"
@@ -347,7 +352,6 @@ jobs:
 
           git add state.json
 
-          # Check if staged content differs from HEAD (handles both new and modified files)
           if git diff --cached --quiet 2>/dev/null; then
             echo "State unchanged — skipping commit"
             exit 0
@@ -358,10 +362,14 @@ jobs:
 
   update-readme-version:
     name: Update README version
-    needs: [fetch-releases, promote-latest]
+    needs: [fetch-releases, build-versions, promote-latest, update-state]
     if: |
+      needs.fetch-releases.outputs.latest_version != '' &&
+      needs.build-versions.result == 'success' &&
+      needs.build-versions.outputs.has_builds == 'true' &&
       needs.promote-latest.result == 'success' &&
-      needs.fetch-releases.outputs.latest_version != ''
+      needs.update-state.result == 'success' &&
+      contains(needs.fetch-releases.outputs.versions_json, needs.fetch-releases.outputs.latest_version)
     runs-on: ${{ vars.ACTION_RUNNER_VERSION || 'ubuntu-latest' }}
     permissions:
       contents: write
@@ -416,9 +424,13 @@ jobs:
 
   update-dockerhub-description:
     name: Update Docker Hub description
-    needs: [promote-latest, update-readme-version]
+    needs: [fetch-releases, build-versions, promote-latest, update-state, update-readme-version]
     if: |
-      always() &&
-      needs.promote-latest.result == 'success'
+      needs.build-versions.result == 'success' &&
+      needs.build-versions.outputs.has_builds == 'true' &&
+      needs.promote-latest.result == 'success' &&
+      needs.update-state.result == 'success' &&
+      needs.update-readme-version.result == 'success' &&
+      contains(needs.fetch-releases.outputs.versions_json, needs.fetch-releases.outputs.latest_version)
     uses: ./.github/workflows/update-dockerhub-readme.yml
     secrets: inherit
