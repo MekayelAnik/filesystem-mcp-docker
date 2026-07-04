@@ -74,7 +74,7 @@ Filesystem MCP Server provides secure filesystem access capabilities through the
 |:----|:---------:|:------------|:---------|
 | `stable` | ⭐⭐⭐ | Most stable release | **Recommended for production** |
 | `latest` | ⭐⭐⭐ | Latest stable release | Stay current with stable features |
-| `2026.1.14` | ⭐⭐⭐ | Specific version | Version pinning for consistency |
+| `2026.7.4` | ⭐⭐⭐ | Specific version | Version pinning for consistency |
 | `beta` | ⚠️ | Beta releases | **Testing only** |
 
 ### System Requirements
