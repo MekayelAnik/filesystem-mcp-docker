@@ -76,7 +76,7 @@ RUN --mount=type=cache,target=/root/.npm \\
 RUN --mount=type=cache,target=/root/.cache/pip \\
     echo "Installing ${MCP_PROXY_PKG}..." && \\
     pip install --no-cache-dir --break-system-packages ${MCP_PROXY_PKG} && \\
-    mcp-proxy --version || true && \\
+    mcp-proxy --version && \\
     rm -rf /tmp/* /var/tmp/* && \\
     rm -rf /usr/local/lib/node_modules/npm/man /usr/local/lib/node_modules/npm/docs /usr/local/lib/node_modules/npm/html
 
