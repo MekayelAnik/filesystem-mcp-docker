@@ -9,6 +9,7 @@ permissions:
 
 jobs:
   update-dockerhub-description:
+    timeout-minutes: 120
     name: Sync README to Docker Hub
     runs-on: ${{ vars.ACTION_RUNNER_VERSION || 'ubuntu-latest' }}
     steps:

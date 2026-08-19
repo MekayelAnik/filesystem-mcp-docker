@@ -84,6 +84,7 @@ env:
 
 jobs:
   quick-check:
+    timeout-minutes: 15
     name: Check if pipeline run is needed
     runs-on: ${{ vars.ACTION_RUNNER_VERSION || 'ubuntu-latest' }}
     outputs:
@@ -146,6 +147,7 @@ jobs:
           echo "should_run=false" >> "$GITHUB_OUTPUT"
 
   preflight:
+    timeout-minutes: 15
     name: Preflight checks
     needs: [quick-check]
     if: needs.quick-check.outputs.should_run == 'true'
@@ -173,6 +175,7 @@ jobs:
         uses: ./.github/actions/preflight-shell-tests
 
   fetch-releases:
+    timeout-minutes: 15
     name: Fetch and filter NPM releases
     needs: [quick-check]
     if: needs.quick-check.outputs.should_run == 'true'
@@ -276,6 +279,7 @@ jobs:
       DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
 
   update-state:
+    timeout-minutes: 15
     name: Update pipeline state
     # Runs immediately after promote-latest. Fires only when a NEW latest
     # version was actually built + promoted in this run (has_builds=true).
@@ -361,6 +365,7 @@ jobs:
           git push "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git" HEAD:pipeline-state
 
   update-readme-version:
+    timeout-minutes: 15
     name: Update README version
     needs: [fetch-releases, build-versions, promote-latest, update-state]
     if: |

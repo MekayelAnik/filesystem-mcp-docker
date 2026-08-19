@@ -48,6 +48,7 @@ permissions:
 
 jobs:
   promote-latest:
+    timeout-minutes: 120
     name: Promote latest tag
     runs-on: ${{ inputs.runner_version || 'ubuntu-latest' }}
     if: inputs.latest_version != ''

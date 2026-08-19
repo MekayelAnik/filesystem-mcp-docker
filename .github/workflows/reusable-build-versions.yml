@@ -92,6 +92,7 @@ permissions:
 jobs:
   # ── Prepare cross-product matrix: versions × platforms ──
   prepare-matrix:
+    timeout-minutes: 120
     name: Prepare build matrix
     runs-on: ${{ inputs.runner_version || 'ubuntu-latest' }}
     outputs:
@@ -215,6 +216,7 @@ jobs:
 
   # ── Per-platform build (native or QEMU-emulated) ──
   build-platform:
+    timeout-minutes: 120
     name: Build ${{ matrix.version }} (${{ matrix.slug }})
     needs: [prepare-matrix]
     if: needs.prepare-matrix.outputs.has_builds == 'true'
@@ -353,6 +355,7 @@ jobs:
 
   # ── Merge per-platform digests into multi-arch manifest ──
   merge-manifest:
+    timeout-minutes: 120
     name: Merge ${{ matrix.version }}
     needs: [prepare-matrix, build-platform]
     if: ${{ !cancelled() && needs.prepare-matrix.result == 'success' && needs.prepare-matrix.outputs.has_builds == 'true' }}
